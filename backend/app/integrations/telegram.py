@@ -1,0 +1,129 @@
+from uuid import UUID
+
+import httpx
+
+from app.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+
+class TelegramNotifier:
+    def __init__(self, bot_token: str, notify_chat_id: str):
+        self.bot_token = bot_token
+        self.notify_chat_id = notify_chat_id
+        self.api_url = f"https://api.telegram.org/bot{bot_token}"
+
+    async def _send(self, message: str, parse_mode: str = "HTML") -> None:
+        if not self.bot_token or not self.notify_chat_id:
+            return
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                await client.post(
+                    f"{self.api_url}/sendMessage",
+                    json={
+                        "chat_id": self.notify_chat_id,
+                        "text": message,
+                        "parse_mode": parse_mode,
+                        "disable_web_page_preview": True,
+                    },
+                )
+        except Exception as exc:
+            logger.error("telegram_notify_failed", error=str(exc))
+
+    async def _send_with_keyboard(self, message: str, keyboard: list) -> None:
+        """Отправляет сообщение с inline-кнопками."""
+        if not self.bot_token or not self.notify_chat_id:
+            return
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                await client.post(
+                    f"{self.api_url}/sendMessage",
+                    json={
+                        "chat_id": self.notify_chat_id,
+                        "text": message,
+                        "parse_mode": "HTML",
+                        "reply_markup": {"inline_keyboard": keyboard},
+                        "disable_web_page_preview": True,
+                    },
+                )
+        except Exception as exc:
+            logger.error("telegram_keyboard_failed", error=str(exc))
+
+    async def notify_pending_verification(self, report) -> None:
+        await self._send(
+            f"🟡 <b>Новая заявка</b> (ждёт верификации email)\n\n"
+            f"📧 {report.email}\n"
+            f"🌐 {report.url}\n"
+            f"🏢 {report.brand_name}\n"
+            f"🌍 {report.region}\n\n"
+            f"Источник: {report.utm_source or 'прямой'}"
+        )
+
+    async def notify_pipeline_started(self, report) -> None:
+        await self._send(
+            f"🟢 <b>Email подтверждён, генерация запущена</b>\n\n"
+            f"📧 {report.email}\n"
+            f"🏢 {report.brand_name}"
+        )
+
+    async def notify_report_ready_for_review(self, report, score: int) -> None:
+        """Эксперту: отчёт готов, выберите действие."""
+        score_emoji = "🔴" if score < 30 else "🟡" if score < 60 else "🟢"
+        from app.config import settings
+        keyboard = [
+            [
+                {"text": "✉️ Отправить как есть", "callback_data": f"action:{report.id}:send_as_is"},
+                {"text": "✍️ Добавить заметку", "callback_data": f"action:{report.id}:add_note"},
+            ],
+            [
+                {"text": "🤐 Не отправлять", "callback_data": f"action:{report.id}:hold"},
+            ],
+        ]
+        await self._send_with_keyboard(
+            f"🎉 <b>Отчёт готов #{str(report.id)[:8]}</b>\n\n"
+            f"🏢 {report.brand_name} ({report.url})\n"
+            f"{score_emoji} Score: {score}/100\n"
+            f"📧 {report.email}\n\n"
+            f"⏰ Авто-отправка через {settings.EXPERT_REVIEW_TIMEOUT_MINUTES} минут.\n"
+            f"🔗 https://catcore.ru/otchet/{report.id}",
+            keyboard=keyboard,
+        )
+
+    async def notify_report_completed(self, report) -> None:
+        score = report.visibility_score or 0
+        score_emoji = "🔴" if score < 30 else "🟡" if score < 60 else "🟢"
+        await self._send(
+            f"📊 <b>Отчёт отправлен клиенту</b>\n\n"
+            f"🏢 {report.brand_name}\n"
+            f"{score_emoji} Score: {score}/100\n"
+            f"📧 {report.email}\n\n"
+            f"🔗 https://catcore.ru/otchet/{report.id}"
+        )
+
+    async def notify_cta_click(self, report, cta_data: dict) -> None:
+        await self._send(
+            f"🔥🔥🔥 <b>ГОРЯЧИЙ ЛИД — КЛИЕНТ ХОЧЕТ КОНСУЛЬТАЦИЮ</b>\n\n"
+            f"🏢 {report.brand_name}\n"
+            f"📊 Score: {report.visibility_score}/100\n"
+            f"📧 {report.email}\n"
+            f"💬 Telegram: {cta_data.get('telegram', 'не указан')}\n\n"
+            f"📝 Комментарий: {cta_data.get('comment', '—')}\n\n"
+            f"⚡ <b>Свяжитесь как можно скорее!</b>\n"
+            f"🔗 https://catcore.ru/otchet/{report.id}"
+        )
+
+    async def notify_high_risk(self, report, reason: str) -> None:
+        await self._send(
+            f"🚨 <b>Подозрительная заявка</b>\n\n"
+            f"📧 {report.email}\n"
+            f"🏢 {report.brand_name}\n"
+            f"⚠️ Причина: {reason}\n\n"
+            f"Действие: rate-limit увеличен."
+        )
+
+    async def notify_pipeline_failed(self, report_id: UUID, error: str) -> None:
+        await self._send(
+            f"❌ <b>Ошибка генерации отчёта</b>\n\n"
+            f"ID: {str(report_id)[:8]}\n"
+            f"Ошибка: {error[:200]}"
+        )

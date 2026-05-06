@@ -1,0 +1,87 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.venv
+venv/
+env/
+
+# FastAPI / Uvicorn
+*.pid
+
+# Environment variables
+.env
+.env.local
+.env.production
+
+# Database
+*.db
+*.sqlite3
+
+# Credentials — НИКОГДА не коммитить!
+backend/credentials/
+credentials/
+*.json
+!pyproject.toml
+
+# Logs
+*.log
+logs/
+
+# Docker
+.docker/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Node.js
+node_modules/
+.next/
+.nuxt/
+dist/
+.cache/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Coverage
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# WeasyPrint/Matplotlib
+*.pdf
+backend/static/charts/
+
+# SSL certificates
+nginx/ssl/
+nginx/certbot/

@@ -1,0 +1,142 @@
+from typing import Annotated
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    # === App ===
+    APP_ENV: str = "development"
+    DEBUG: bool = False
+    SECRET_KEY: str = "change-me"
+    INTERNAL_API_TOKEN: str = "change-me"
+
+    # === Database ===
+    DATABASE_URL: str
+    DATABASE_URL_SYNC: str = ""
+
+    # === Redis / Celery ===
+    REDIS_URL: str = "redis://redis:6379/0"
+    CELERY_BROKER_URL: str = "redis://redis:6379/1"
+    CELERY_RESULT_BACKEND: str = "redis://redis:6379/2"
+
+    # === LLM APIs ===
+    OPENAI_API_KEY: str = ""
+    GEMINI_API_KEY: str = ""
+    DEEPSEEK_API_KEY: str = ""
+    PERPLEXITY_API_KEY: str = ""
+    YANDEX_API_KEY: str = ""
+    YANDEX_FOLDER_ID: str = ""
+    GIGACHAT_AUTH_KEY: str = ""
+
+    # === XMLRiver ===
+    XMLRIVER_USER: str = ""
+    XMLRIVER_KEY: str = ""
+    XMLRIVER_REGION_RU: str = "213"
+    XMLRIVER_REGION_BY: str = "157"
+
+    # === Pipeline ===
+    ENABLED_MODELS: str = "chatgpt,yandexgpt,alisa,gigachat,gemini,deepseek,perplexity"
+    PROMPTS_PER_REPORT: int = 15
+    COMPETITORS_PER_REPORT: int = 5
+    CACHE_TTL_DAYS: int = 7
+    DAILY_REPORT_LIMIT: int = 20
+
+    # === Rate limits ===
+    RATE_LIMIT_PER_DOMAIN_COUNT: int = 2
+    RATE_LIMIT_PER_DOMAIN_BRAND_DAYS: int = 30
+    RATE_LIMIT_PER_EMAIL_DAYS: int = 30
+    RATE_LIMIT_PER_FINGERPRINT_DAYS: int = 30
+    RATE_LIMIT_PER_IP_HOURS: int = 24
+    RATE_LIMIT_PER_VPN_DAYS: int = 90
+
+    # === Per-model rate limits (RPM) ===
+    OPENAI_MAX_RPM: int = 400
+    GEMINI_MAX_RPM: int = 12
+    DEEPSEEK_MAX_RPM: int = 60
+    YANDEX_MAX_RPM: int = 100
+    GIGACHAT_MAX_RPM: int = 50
+    PERPLEXITY_MAX_RPM: int = 50
+    ALISA_MAX_RPM: int = 100
+
+    # === Celery ===
+    CELERY_WORKER_CONCURRENCY: int = 2
+    CELERY_TASK_TIME_LIMIT: int = 600
+
+    # === S3 ===
+    S3_ENDPOINT_URL: str = "https://s3.timeweb.cloud"
+    S3_ACCESS_KEY: str = ""
+    S3_SECRET_KEY: str = ""
+    S3_BUCKET: str = "ai-visibility-reports"
+    S3_REGION: str = "ru-1"
+
+    # === Email ===
+    SMTP_HOST: str = "smtp.timeweb.ru"
+    SMTP_PORT: int = 465
+    SMTP_USER: str = "noreply@catcore.ru"
+    SMTP_PASSWORD: str = ""
+    FROM_EMAIL: str = "noreply@catcore.ru"
+    SUPPORT_EMAIL: str = "support@catcore.ru"
+    CONTACT_EMAIL: str = "info@catcore.ru"
+
+    # === Cloudflare Turnstile ===
+    TURNSTILE_SITE_KEY: str = ""
+    TURNSTILE_SECRET_KEY: str = ""
+
+    # === IP Quality ===
+    IPAPI_KEY: str = ""
+
+    # === Sentry ===
+    SENTRY_DSN: str = ""
+
+    # === Студия и эксперт ===
+    EXPERT_NAME: str = "[EXPERT_NAME]"
+    EXPERT_FIRST_NAME: str = "[EXPERT_FIRST_NAME]"
+    EXPERT_LAST_NAME: str = "[EXPERT_LAST_NAME]"
+    EXPERT_TITLE: str = "[EXPERT_TITLE]"
+    EXPERT_PHOTO_URL: str = "/expert.jpg"
+    EXPERT_BIO_SHORT: str = "[EXPERT_BIO_SHORT]"
+
+    STUDIO_NAME: str = "Cat Core"
+    STUDIO_NAME_FULL: str = "Cat Core — студия GEO-продвижения"
+    STUDIO_DOMAIN: str = "catcore.ru"
+    STUDIO_FULL_URL: str = "https://catcore.ru"
+    STUDIO_LOGO_URL: str = "/logo.svg"
+    STUDIO_FOUNDED_YEAR: int = 2025
+    STUDIO_CITY: str = "Минск"
+    STUDIO_COUNTRY_CODE: str = "BY"
+
+    CONTACT_TG_BOT: str = "@catcore_sitebot"
+    CONTACT_TG_BOT_URL: str = "https://t.me/catcore_sitebot"
+
+    # === Telegram ===
+    TELEGRAM_BOT_TOKEN: str = ""
+    TELEGRAM_NOTIFY_CHAT_ID: str = ""
+
+    # === Workflow эксперта ===
+    EXPERT_REVIEW_BEFORE_SEND: bool = True
+    EXPERT_REVIEW_TIMEOUT_MINUTES: int = 30
+
+    # === Google Sheets ===
+    GOOGLE_SHEETS_CREDENTIALS_PATH: str = "./credentials/google-service-account.json"
+    GOOGLE_SHEETS_SPREADSHEET_ID: str = ""
+
+    @property
+    def enabled_models_list(self) -> list[str]:
+        return [m.strip() for m in self.ENABLED_MODELS.split(",") if m.strip()]
+
+    @property
+    def model_rate_limits(self) -> dict[str, int]:
+        return {
+            "chatgpt": self.OPENAI_MAX_RPM,
+            "yandexgpt": self.YANDEX_MAX_RPM,
+            "alisa": self.ALISA_MAX_RPM,
+            "gigachat": self.GIGACHAT_MAX_RPM,
+            "gemini": self.GEMINI_MAX_RPM,
+            "deepseek": self.DEEPSEEK_MAX_RPM,
+            "perplexity": self.PERPLEXITY_MAX_RPM,
+        }
+
+
+settings = Settings()

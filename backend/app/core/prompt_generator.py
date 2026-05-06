@@ -1,0 +1,43 @@
+import json
+from typing import Any
+
+from openai import AsyncOpenAI
+
+from app.config import settings
+from app.core.llm_prompts import PROMPT_GENERATOR_PROMPT
+from app.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+
+async def generate_prompts(niche: dict[str, Any], count: int = 15) -> list[str]:
+    """Генерирует список запросов для опроса LLM-моделей (1 вызов)."""
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+
+    prompt = PROMPT_GENERATOR_PROMPT.format(
+        category=niche.get("category", ""),
+        subcategory=niche.get("subcategory", ""),
+        region=niche.get("region", ""),
+        target_audience_description=niche.get("target_audience_description", ""),
+    )
+
+    response = await client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.7,
+        max_tokens=800,
+    )
+
+    raw = response.choices[0].message.content or "[]"
+
+    try:
+        raw = raw.strip().strip("```json").strip("```").strip()
+        prompts: list[str] = json.loads(raw)
+        prompts = [p for p in prompts if isinstance(p, str) and p.strip()][:count]
+    except (json.JSONDecodeError, TypeError):
+        logger.error("prompt_generator_json_error", raw=raw[:200])
+        # Используем типичные запросы из нише-детектора как fallback
+        prompts = niche.get("typical_user_questions", [])
+
+    logger.info("prompts_generated", count=len(prompts))
+    return prompts

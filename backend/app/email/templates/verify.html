@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Подтвердите запрос</title>
+  <style>
+    body { font-family: -apple-system, Arial, sans-serif; background: #f5f5f7; margin: 0; padding: 20px; }
+    .container { max-width: 600px; margin: 0 auto; background: #fff; border-radius: 16px; overflow: hidden; }
+    .header { background: #0066FF; padding: 32px 40px; text-align: center; }
+    .header h1 { color: #fff; margin: 0; font-size: 24px; }
+    .body { padding: 40px; }
+    .btn { display: inline-block; background: #0066FF; color: #fff !important; text-decoration: none; padding: 16px 40px; border-radius: 12px; font-size: 18px; font-weight: bold; margin: 24px 0; }
+    .warning { background: #FFF3CD; border: 2px solid #FFD600; border-radius: 12px; padding: 20px; margin: 24px 0; }
+    .footer { padding: 32px 40px; border-top: 1px solid #e0e0e0; }
+    .expert { display: flex; align-items: center; gap: 16px; }
+    .expert img { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; }
+    p { color: #1C1C1E; line-height: 1.6; }
+    .muted { color: #8E8E93; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>{{ STUDIO_NAME }}</h1>
+    </div>
+    <div class="body">
+      <p>Здравствуйте!</p>
+      <p>Вы запросили <strong>проверку видимости бренда «{{ brand_name }}»</strong> в ИИ-ассистентах.</p>
+      <p>Чтобы запустить анализ, нажмите кнопку ниже:</p>
+
+      <div style="text-align:center;">
+        <a href="{{ verification_url }}" class="btn">✅ Запустить анализ</a>
+      </div>
+
+      <div class="warning">
+        <strong>⚠️ Не пришло письмо за 1 минуту?</strong>
+        <ol style="margin-top:8px;">
+          <li>Проверьте папку <strong>«Спам»</strong> или <strong>«Промоакции»</strong></li>
+          <li>Поищите письмо от <code>noreply@catcore.ru</code></li>
+          <li>Если не нашли — проверьте, что email введён правильно</li>
+        </ol>
+        <p style="margin-bottom:0; margin-top:12px; font-size:13px; color:#666;">
+          Добавьте noreply@catcore.ru в адресную книгу — иначе отчёт тоже может попасть в спам.
+        </p>
+      </div>
+
+      <p style="background:#F2F2F7; border-radius:12px; padding:20px;">
+        <strong>Что произойдёт после клика:</strong><br><br>
+        ✉️ Вы кликаете на кнопку<br>
+        🔍 Сразу запускается анализ (2–5 минут)<br>
+        📊 Готовый отчёт приходит на email + открывается в браузере
+      </p>
+
+      <p class="muted">Ссылка действительна 24 часа. Если вы не запрашивали отчёт — просто проигнорируйте это письмо.</p>
+    </div>
+    <div class="footer">
+      <div class="expert">
+        <img src="{{ EXPERT_PHOTO_URL }}" alt="{{ EXPERT_NAME }}">
+        <div>
+          <strong>{{ EXPERT_NAME }}</strong><br>
+          <span style="color:#666;">{{ EXPERT_TITLE }}</span><br>
+          <a href="{{ CONTACT_TG_BOT_URL }}" style="color:#0066FF;">💬 Написать в Telegram</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
