@@ -1,0 +1,135 @@
+<!-- ===== ТАБЛИЦА ВСЕХ ЗАПРОСОВ ===== -->
+<div class="section page-break">
+  <div class="section-title">Детали по запросам</div>
+
+  <p style="font-size:9pt; color:#3A3A3C; margin-bottom:5mm;">
+    Результаты проверки по каждому из {{ prompts_count }} запросов к ИИ-ассистентам.
+    В ячейках показана тональность упоминания: ✅ — позитивное, ➖ — нейтральное, ⚠️ — негативное,
+    · — не упоминается.
+  </p>
+
+  <!-- Сводная таблица запросов × модели -->
+  <table style="font-size:7.5pt;">
+    <tr>
+      <th style="width:34%">Запрос</th>
+      {% for model in models_list %}
+      <th style="text-align:center; width:{{ (66 / models_list|length)|round|int }}%;">
+        {{ model.short_name }}
+      </th>
+      {% endfor %}
+    </tr>
+
+    {% for row in prompts_matrix %}
+    <tr>
+      <td style="font-size:7.5pt; line-height:1.3;">{{ row.prompt }}</td>
+      {% for cell in row.cells %}
+      <td style="text-align:center; vertical-align:middle;">
+        {% if cell.mentioned and cell.sentiment == 'positive' %}
+          <span style="color:#34C759; font-weight:700;" title="Упоминается позитивно">✅</span>
+        {% elif cell.mentioned and cell.sentiment == 'negative' %}
+          <span style="color:#FF3B30; font-weight:700;" title="Упоминается негативно">⚠️</span>
+        {% elif cell.mentioned %}
+          <span style="color:#FF9500;" title="Упоминается нейтрально">➖</span>
+        {% elif cell.error %}
+          <span style="color:#C7C7CC;" title="Ошибка запроса">!</span>
+        {% else %}
+          <span style="color:#C7C7CC;">·</span>
+        {% endif %}
+        {% if cell.position %}
+          <br><span style="font-size:6.5pt; color:#8E8E93;">#{{ cell.position }}</span>
+        {% endif %}
+      </td>
+      {% endfor %}
+    </tr>
+    {% endfor %}
+  </table>
+
+  <!-- Легенда -->
+  <div style="margin-top:5mm; display:flex; gap:6mm; font-size:7.5pt; color:#8E8E93; flex-wrap:wrap;">
+    <span><span style="color:#34C759; font-weight:700;">✅</span> Позитивное упоминание</span>
+    <span><span style="color:#FF9500;">➖</span> Нейтральное упоминание</span>
+    <span><span style="color:#FF3B30; font-weight:700;">⚠️</span> Негативное упоминание</span>
+    <span><span style="color:#C7C7CC;">·</span> Не упоминается</span>
+    <span><span style="color:#C7C7CC;">!</span> Ошибка запроса</span>
+  </div>
+
+  <!-- Топ-5 лучших и худших запросов -->
+  {% if top_prompts or bottom_prompts %}
+  <div style="margin-top:8mm; display:grid; grid-template-columns:1fr 1fr; gap:6mm; page-break-inside:avoid;">
+
+    {% if top_prompts %}
+    <div>
+      <p style="font-size:9.5pt; font-weight:700; color:#34C759; margin:0 0 3mm;">
+        🏆 Лучшие запросы для вас
+      </p>
+      {% for p in top_prompts %}
+      <div style="background:#F0FFF4; border-left:3px solid #34C759; border-radius:4px;
+                  padding:2mm 3mm; margin-bottom:2mm; font-size:8pt;">
+        <span style="font-weight:600;">{{ loop.index }}. {{ p.prompt }}</span><br>
+        <span style="color:#8E8E93;">
+          Упоминаний: {{ p.mention_count }}/{{ models_total }}
+          {% if p.avg_sentiment == 'positive' %} · преобладает позитив{% endif %}
+        </span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if bottom_prompts %}
+    <div>
+      <p style="font-size:9.5pt; font-weight:700; color:#FF3B30; margin:0 0 3mm;">
+        ⚡ Приоритеты для улучшения
+      </p>
+      {% for p in bottom_prompts %}
+      <div style="background:#FFF5F5; border-left:3px solid #FF3B30; border-radius:4px;
+                  padding:2mm 3mm; margin-bottom:2mm; font-size:8pt;">
+        <span style="font-weight:600;">{{ loop.index }}. {{ p.prompt }}</span><br>
+        <span style="color:#8E8E93;">
+          Упоминаний: {{ p.mention_count }}/{{ models_total }}
+          {% if p.competitor_count > 0 %} · конкуренты: {{ p.competitor_count }}{% endif %}
+        </span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+  </div>
+  {% endif %}
+
+  <!-- Что покрывают источники -->
+  {% if citation_sources %}
+  <div style="margin-top:8mm; page-break-inside:avoid;">
+    <p style="font-size:9.5pt; font-weight:700; margin:0 0 3mm;">
+      📚 Источники, которые цитируют ИИ в вашей нише
+    </p>
+    <p style="font-size:8pt; color:#8E8E93; margin-bottom:3mm;">
+      Эти площадки используются ИИ-ассистентами при ответах на запросы в нише «{{ niche }}».
+      Наличие вашего контента на них напрямую влияет на AI Visibility.
+    </p>
+    <table style="font-size:8pt;">
+      <tr>
+        <th style="width:40%">Источник</th>
+        <th style="width:20%; text-align:center;">Упоминаний</th>
+        <th style="width:20%; text-align:center;">Авторитетность</th>
+        <th style="width:20%">Ваш контент</th>
+      </tr>
+      {% for src in citation_sources %}
+      <tr>
+        <td>{{ src.domain }}</td>
+        <td style="text-align:center;">{{ src.count }}</td>
+        <td style="text-align:center;">
+          {% for i in range(src.authority) %}★{% endfor %}{% for i in range(5 - src.authority) %}☆{% endfor %}
+        </td>
+        <td>
+          {% if src.has_client_content %}
+            <span style="color:#34C759; font-weight:700;">✅ Есть</span>
+          {% else %}
+            <span style="color:#FF3B30;">❌ Нет</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% endif %}
+</div>

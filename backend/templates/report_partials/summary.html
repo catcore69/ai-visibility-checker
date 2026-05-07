@@ -1,0 +1,84 @@
+<!-- ===== EXECUTIVE SUMMARY ===== -->
+<div class="section">
+  <div class="section-title">Executive Summary</div>
+
+  <div class="summary-verdict">
+    {{ verdict }}
+  </div>
+
+  <!-- Ключевые метрики -->
+  <div class="metrics-grid">
+    <div class="metric-card">
+      <div class="metric-val">{{ visibility_score }}</div>
+      <div class="metric-label">AI Visibility Score</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-val">{{ presence_rate }}%</div>
+      <div class="metric-label">Presence Rate<br>(упоминаний)</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-val">{{ models_found }}/{{ models_total }}</div>
+      <div class="metric-label">Моделей<br>упоминают вас</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-val">{{ prompts_count }}</div>
+      <div class="metric-label">Запросов<br>проверено</div>
+    </div>
+  </div>
+
+  <!-- Краткий вывод -->
+  <p>
+    Мы проверили видимость бренда <strong>«{{ brand_name }}»</strong> в {{ models_total }} ведущих ИИ-ассистентах
+    по {{ prompts_count }} поисковым запросам в нише <em>{{ niche }}</em>.
+  </p>
+
+  {% if sov_rank %}
+  <p>
+    По показателю Share of Voice вы занимаете
+    <strong>{{ sov_rank }}-е место</strong> среди {{ competitors_count + 1 }} брендов в анализе.
+    {% if sov_rank == 1 %}
+      Это отличный результат — вы лидируете в своей нише в ИИ-поиске.
+    {% elif sov_rank <= 3 %}
+      Есть хороший задел, но конкуренты активнее работают с ИИ-контентом.
+    {% else %}
+      Ваш бренд значительно уступает конкурентам в ИИ-видимости — это точка роста.
+    {% endif %}
+  </p>
+  {% endif %}
+
+  {% if top_weakness %}
+  <p>
+    <strong>Главная точка роста:</strong> {{ top_weakness }}
+  </p>
+  {% endif %}
+
+  <!-- Сильные стороны и зоны роста -->
+  {% if strong_models or weak_models %}
+  <table style="margin-top: 6mm;">
+    <tr>
+      <th style="width:50%">✅ Сильные позиции</th>
+      <th style="width:50%">⚠️ Зоны роста</th>
+    </tr>
+    <tr>
+      <td>
+        {% if strong_models %}
+          {% for m in strong_models %}
+            <span style="color:#34C759; font-weight:600;">{{ m }}</span>{% if not loop.last %}, {% endif %}
+          {% endfor %}
+        {% else %}
+          —
+        {% endif %}
+      </td>
+      <td>
+        {% if weak_models %}
+          {% for m in weak_models %}
+            <span style="color:#FF3B30; font-weight:600;">{{ m }}</span>{% if not loop.last %}, {% endif %}
+          {% endfor %}
+        {% else %}
+          —
+        {% endif %}
+      </td>
+    </tr>
+  </table>
+  {% endif %}
+</div>
