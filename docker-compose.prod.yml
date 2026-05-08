@@ -4,6 +4,8 @@ services:
   redis:
     image: redis:7-alpine
     restart: always
+    ports:
+      - "127.0.0.1:6379:6379"   # доступен только с localhost хоста
     volumes:
       - redis_data:/data
     healthcheck:
@@ -17,10 +19,9 @@ services:
       context: ./backend
     restart: always
     env_file: .env
+    network_mode: host          # видит 192.168.0.4 и redis на 127.0.0.1
     depends_on:
       - redis
-    expose:
-      - "8000"
     volumes:
       - ./backend/credentials:/app/credentials:ro
     healthcheck:
@@ -35,6 +36,7 @@ services:
       context: ./backend
     restart: always
     env_file: .env
+    network_mode: host
     depends_on:
       - redis
     volumes:
@@ -46,6 +48,7 @@ services:
       context: ./backend
     restart: always
     env_file: .env
+    network_mode: host
     depends_on:
       - redis
     command: celery -A app.celery_app beat --loglevel=info
@@ -56,8 +59,8 @@ services:
       dockerfile: Dockerfile
     restart: always
     env_file: .env
-    expose:
-      - "3000"
+    ports:
+      - "127.0.0.1:3000:3000"
 
   nginx:
     image: nginx:alpine
@@ -70,7 +73,6 @@ services:
       - /etc/letsencrypt:/etc/nginx/ssl:ro
       - ./nginx/certbot/www:/var/www/certbot:ro
     depends_on:
-      - backend
       - frontend
 
 volumes:
