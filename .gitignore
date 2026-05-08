@@ -36,8 +36,9 @@ env/
 # Credentials — НИКОГДА не коммитить!
 backend/credentials/
 credentials/
-*.json
-!pyproject.toml
+*service_account*.json
+*credentials*.json
+*secrets*.json
 
 # Logs
 *.log
