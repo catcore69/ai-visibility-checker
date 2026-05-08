@@ -11,7 +11,10 @@ from alembic import context
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    try:
+        fileConfig(config.config_file_name)
+    except Exception:
+        pass  # alembic.ini may use env-var interpolation unsupported by configparser
 
 # Импортируем все модели для автогенерации миграций
 from app.db.base import Base
