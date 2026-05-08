@@ -5,11 +5,8 @@ __pycache__/
 *.so
 .Python
 build/
-dist/
 eggs/
 .eggs/
-lib/
-lib64/
 parts/
 sdist/
 var/
@@ -20,6 +17,9 @@ wheels/
 .venv
 venv/
 env/
+# Python venv lib dirs (scoped to avoid catching frontend/lib)
+backend/lib/
+backend/lib64/
 
 # FastAPI / Uvicorn
 *.pid
@@ -56,7 +56,7 @@ logs/
 node_modules/
 .next/
 .nuxt/
-dist/
+frontend/dist/
 .cache/
 npm-debug.log*
 yarn-debug.log*
