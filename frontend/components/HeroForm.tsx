@@ -35,31 +35,31 @@ export default function HeroForm() {
   const mountedRef     = useRef(false);
 
   // Mount Turnstile once
-  useEffect(() => {
-    if (mountedRef.current || !SITE_KEY) return;
-    mountedRef.current = true;
+//  useEffect(() => {
+  //  if (mountedRef.current || !SITE_KEY) return;
+    //mountedRef.current = true;
 
-    const tryRender = () => {
-      if (!turnstileRef.current || !window.turnstile) {
-        setTimeout(tryRender, 300);
-        return;
-      }
-      widgetIdRef.current = window.turnstile.render(turnstileRef.current, {
-        sitekey: SITE_KEY,
-        callback: (token: string) => setTurnstileToken(token),
-        'expired-callback': () => setTurnstileToken(''),
-        theme: 'light',
-        size: 'normal',
-      });
-    };
-    tryRender();
+    //const tryRender = () => {
+      //if (!turnstileRef.current || !window.turnstile) {
+        //setTimeout(tryRender, 300);
+        //return;
+      //}
+      //widgetIdRef.current = window.turnstile.render(turnstileRef.current, {
+        //sitekey: SITE_KEY,
+        //callback: (token: string) => setTurnstileToken(token),
+        //'expired-callback': () => setTurnstileToken(''),
+        //theme: 'light',
+        //size: 'normal',
+      //});
+    //};
+    //tryRender();
 
-    return () => {
-      if (widgetIdRef.current) {
-        window.turnstile?.remove(widgetIdRef.current);
-      }
-    };
-  }, []);
+    //return () => {
+      //if (widgetIdRef.current) {
+        //window.turnstile?.remove(widgetIdRef.current);
+      //}
+    //};
+  //}, []);
 
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
@@ -72,21 +72,21 @@ export default function HeroForm() {
       setError('Пожалуйста, заполните все поля.');
       return;
     }
-    if (SITE_KEY && !turnstileToken) {
-      setError('Пожалуйста, подождите — загружается проверка защиты от ботов.');
-      return;
-    }
+    //if (SITE_KEY && !turnstileToken) {
+      //setError('Пожалуйста, подождите — загружается проверка защиты от ботов.');
+      //return;
+    //}
 
     setLoading(true);
     try {
       const fingerprintId = await getFingerprint();
 
       const payload: CheckPayload = {
-        website_url:     websiteUrl.trim(),
+        url:     websiteUrl.trim(),
         brand_name:      brandName.trim(),
         niche:           niche.trim(),
         email:           email.trim().toLowerCase(),
-        turnstile_token: turnstileToken,
+	turnstile_token: '',      
         fingerprint_id:  fingerprintId,
         hp_name:         hpName,
         utm_source:      searchParams.get('utm_source') || undefined,
@@ -98,8 +98,8 @@ export default function HeroForm() {
       router.push(`/proverka/verify-email?id=${result.report_id}&email=${encodeURIComponent(email)}`);
     } catch (err: unknown) {
       // Reset turnstile
-      if (widgetIdRef.current) window.turnstile?.reset(widgetIdRef.current);
-      setTurnstileToken('');
+//      if (widgetIdRef.current) window.turnstile?.reset(widgetIdRef.current);
+  //    setTurnstileToken('');
 
       const axiosErr = err as { response?: { data?: { detail?: string } }; message?: string };
       const detail = axiosErr.response?.data?.detail;
@@ -196,16 +196,12 @@ export default function HeroForm() {
         </p>
       </div>
 
-      {/* Turnstile widget */}
-      {SITE_KEY && (
-        <div ref={turnstileRef} className="flex justify-center" />
-      )}
 
       {/* Error */}
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700">
           {error}
-        </div>
+       </div>
       )}
 
       {/* Submit */}

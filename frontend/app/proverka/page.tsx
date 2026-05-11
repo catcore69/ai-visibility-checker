@@ -2,7 +2,7 @@ import { Suspense } from 'react';
 import HeroForm from '@/components/HeroForm';
 
 export const metadata = {
-  title: 'Проверить AI Visibility бренда — Cat Core GEO',
+  title: 'Проверить AI Visibility бренда — CatCore GEO',
   description: 'Бесплатная проверка: как часто ИИ-ассистенты упоминают ваш бренд. Получите PDF-отчёт с анализом ChatGPT, YandexGPT, GigaChat, Gemini и других.',
 };
 
@@ -94,7 +94,7 @@ export default function ProverkaPage() {
       {/* Social proof */}
       <div className="max-w-5xl mx-auto px-4 pb-20 text-center">
         <p className="text-gray-400 text-sm">
-          Инструмент от <strong className="text-gray-600">Cat Core GEO Studio</strong> ·
+          Инструмент от <strong className="text-gray-600">CatCore GEO Studio</strong> ·
           Специализируемся на GEO-продвижении для российского и международного рынка
         </p>
       </div>

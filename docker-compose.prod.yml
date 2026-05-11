@@ -64,10 +64,8 @@ services:
 
   nginx:
     image: nginx:alpine
+    network_mode: host
     restart: always
-    ports:
-      - "80:80"
-      - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - /etc/letsencrypt:/etc/nginx/ssl:ro

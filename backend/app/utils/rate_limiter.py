@@ -13,27 +13,29 @@ from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-
 async def verify_turnstile(token: str, ip: str) -> bool:
-    """Валидирует Cloudflare Turnstile токен."""
-    if not settings.TURNSTILE_SECRET_KEY:
-        return True  # В dev режиме пропускаем
+    """Временно отключаем проверку Turnstile."""
+    return True
+#async def verify_turnstile(token: str, ip: str) -> bool:
+ #   """Валидирует Cloudflare Turnstile токен."""
+#    if not settings.TURNSTILE_SECRET_KEY:
+  #      return True  # В dev режиме пропускаем
 
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.post(
-                "https://challenges.cloudflare.com/turnstile/v0/siteverify",
-                data={
-                    "secret": settings.TURNSTILE_SECRET_KEY,
-                    "response": token,
-                    "remoteip": ip,
-                },
-            )
-            data = resp.json()
-            return data.get("success", False)
-    except Exception as exc:
-        logger.warning("turnstile_error", error=str(exc))
-        return True  # Fail open — не блокируем при сбое капчи
+ #   try:
+  #      async with httpx.AsyncClient(timeout=5.0) as client:
+   #         resp = await client.post(
+    #            "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+     #           data={
+      #              "secret": settings.TURNSTILE_SECRET_KEY,
+       #             "response": token,
+        #            "remoteip": ip,
+         #       },
+          #  )
+           # data = resp.json()
+            #return data.get("success", False)
+  #  except Exception as exc:
+   #     logger.warning("turnstile_error", error=str(exc))
+    #    return True  # Fail open — не блокируем при сбое капчи
 
 
 async def check_can_create_report(
@@ -55,8 +57,8 @@ async def check_can_create_report(
         return False, "bot_detected_honeypot"
 
     # 1. Cloudflare Turnstile
-    if not await verify_turnstile(turnstile_token, ip):
-        return False, "turnstile_failed"
+   # if not await verify_turnstile(turnstile_token, ip):
+    #    return False, "turnstile_failed"
 
     # 2. Disposable email
     if is_disposable_email(email):

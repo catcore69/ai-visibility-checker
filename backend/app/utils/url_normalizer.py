@@ -43,3 +43,13 @@ def mask_email(email: str) -> str:
     if len(name) <= 1:
         return f"*@{domain}"
     return f"{name[0]}****@{domain}"
+
+
+def extract_brand_from_url(url: str) -> str:
+    """Извлекает название бренда из URL (домен без www, tld и дефисов)."""
+    domain = extract_root_domain(url)
+    # Take the main part before the TLD
+    parts = domain.split('.')
+    brand = parts[0] if parts else domain
+    # Capitalize first letter
+    return brand.capitalize() if brand else url

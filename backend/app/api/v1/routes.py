@@ -48,23 +48,26 @@ async def start_check(
 ) -> CheckResponse:
     """Принимает заявку, отправляет email верификации. Pipeline стартует только после клика."""
 
-    ip = request.client.host if request.client else "0.0.0.0"
+    ip = request.headers.get("X-Real-IP") or request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or (request.client.host if request.client else "0.0.0.0")
     brand_name = body.brand_name or extract_brand_from_url(body.url)
 
     # Многослойная проверка защиты от абуза
-    can_create, reason = await check_can_create_report(
-        redis=redis,
-        email=str(body.email),
-        url=body.url,
-        brand=brand_name,
-        fingerprint=body.browser_fingerprint,
-        ip=ip,
-        honeypot_value=body.website_url_honeypot,
-        turnstile_token=body.turnstile_token,
-    )
-    if not can_create:
-        logger.warning("rate_limit_hit", reason=reason, ip=ip, email=str(body.email))
-        raise HTTPException(429, f"Слишком много запросов: {reason}")
+  #  can_create, reason = await check_can_create_report(
+    #    redis=redis,
+      #  email=str(body.email),
+        #url=body.url,
+        #brand=brand_name,
+        #fingerprint=body.browser_fingerprint,
+        #ip=ip,
+        #honeypot_value=body.website_url_honeypot,
+        #turnstile_token=body.turnstile_token,
+    #)
+    #if not can_create:
+      #  logger.warning("rate_limit_hit", reason=reason, ip=ip, email=str(body.email))
+        #raise HTTPException(429, f"Слишком много запросов: {reason}")
+# Временно разрешаем все запросы
+    can_create = True
+    reason = "disabled_bypass" # Временно разрешаем все запросы
 
     verification_token = secrets.token_urlsafe(32)
     expires_at = datetime.utcnow() + timedelta(hours=24)
