@@ -104,7 +104,7 @@ async def _analyze_mention_with_llm(
     prompt: str,
 ) -> tuple[list[dict], list[str]]:
     """LLM-as-judge: точный анализ упоминаний."""
-    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, base_url=settings.OPENAI_BASE_URL)
 
     llm_prompt = MENTION_ANALYZER_PROMPT.format(
         prompt=prompt,

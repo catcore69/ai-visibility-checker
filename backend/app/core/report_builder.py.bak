@@ -160,19 +160,7 @@ def _get_worst_prompts(
                         }
                     )
         if competitor_mentions:
-            # Уникальные конкуренты упомянутые в этом промпте
-            competitors_mentioned = list(dict.fromkeys(m["brand"] for m in competitor_mentions))
-            # Сколько моделей упомянули конкурентов
-            models_with_competitor = len(set(m["model"] for m in competitor_mentions))
-            total_models = len(set(r.model_name for r in analysis.all_results if r.prompt == prompt))
-            gap_score = int(models_with_competitor / total_models * 100) if total_models > 0 else 0
-            worst.append({
-                "prompt": prompt,
-                "competitor_mentions": competitor_mentions[:3],
-                "competitors_mentioned": competitors_mentioned[:5],
-                "client_position": None,
-                "gap_score": gap_score,
-            })
+            worst.append({"prompt": prompt, "competitor_mentions": competitor_mentions[:3]})
 
     return worst[:count]
 
@@ -211,34 +199,6 @@ async def build_and_upload_pdf(report, analysis: Analysis, competitors: list[str
 
     # Графики
     score_chart_b64 = _make_score_chart(score)
-
-    # Score components for template
-    _brand_results = analysis.get_brand_results(brand_name)
-    _total_prompts = analysis.total_prompts
-    _total_models = analysis.total_models
-    if _total_prompts > 0 and _total_models > 0:
-        _presence_rate = len([r for r in _brand_results if r.mentioned]) / _total_prompts
-        _model_coverage = len({r.model_name for r in _brand_results if r.mentioned}) / _total_models
-        _positions = [r.position for r in _brand_results if r.mentioned and r.position > 0]
-        _position_score = max(0.1, 1.0 - (sum(_positions) / len(_positions) - 1) * 0.1) if _positions else 0.0
-        _sentiments = [r.sentiment for r in _brand_results if r.mentioned]
-        if _sentiments:
-            _sentiment_factor = (
-                _sentiments.count("positive") * 1.0
-                + _sentiments.count("neutral") * 0.7
-                + _sentiments.count("negative") * 0.3
-            ) / len(_sentiments)
-        else:
-            _sentiment_factor = 0.0
-    else:
-        _presence_rate = _model_coverage = _position_score = _sentiment_factor = 0.0
-    score_components = type("ScoreComponents", (), {
-        "presence_rate_pct": round(_presence_rate * 100),
-        "model_coverage_pct": round(_model_coverage * 100),
-        "position_pct": round(_position_score * 100),
-        "sentiment_pct": round(_sentiment_factor * 100),
-    })()
-
     competitor_chart_b64 = _make_competitor_chart(comparison)
     sentiment_chart_b64 = _make_sentiment_pie(analysis, brand_name)
 
@@ -247,7 +207,6 @@ async def build_and_upload_pdf(report, analysis: Analysis, competitors: list[str
         "report": report,
         "brand_name": brand_name,
         "score": score,
-        "visibility_score": score,
         "score_color": _score_color(score),
         "score_label": "Низкая" if score < 30 else "Средняя" if score < 60 else "Высокая",
         "report_date": datetime.now().strftime("%d.%m.%Y"),
@@ -259,7 +218,6 @@ async def build_and_upload_pdf(report, analysis: Analysis, competitors: list[str
 
         # Аналитика
         "comparison": comparison,
-        "competitor_comparison": comparison,
         "model_breakdown": model_breakdown,
         "top_sources": top_sources[:10],
         "worst_prompts": worst_prompts,
@@ -267,7 +225,6 @@ async def build_and_upload_pdf(report, analysis: Analysis, competitors: list[str
         "share_of_voice": report.share_of_voice or 0,
 
         # Графики (base64 PNG)
-        "score_components": score_components,
         "score_chart_b64": score_chart_b64,
         "competitor_chart_b64": competitor_chart_b64,
         "sentiment_chart_b64": sentiment_chart_b64,
@@ -281,16 +238,6 @@ async def build_and_upload_pdf(report, analysis: Analysis, competitors: list[str
         "STUDIO_LOGO_URL": settings.STUDIO_LOGO_URL,
         "CONTACT_TG_BOT_URL": settings.CONTACT_TG_BOT_URL,
         "CONTACT_EMAIL": settings.CONTACT_EMAIL,
-
-        # Статистика анализа (для шаблонов)
-        "prompts_count": analysis.total_prompts,
-        "models_total": analysis.total_models,
-        "models_found": len(set(r.model_name for r in analysis.get_brand_results(brand_name) if r.mentioned)),
-        "total_queries": analysis.total_prompts * analysis.total_models,
-        "competitors_count": len(competitors),
-        "sov_rank": next((i+1 for i, c in enumerate(sorted(comparison, key=lambda x: -x.get("share_of_voice", 0))) if c.get("brand_name") == brand_name or c.get("name") == brand_name), len(competitors)+1),
-        "verdict": ("Высокая видимость" if score >= 60 else "Средняя видимость" if score >= 30 else "Низкая видимость"),
-        "top_weakness": (worst_prompts[0]["prompt"] if worst_prompts else "Нет данных"),
     }
 
     template = env.get_template("report.html")

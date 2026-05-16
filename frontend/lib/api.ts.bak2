@@ -42,13 +42,6 @@ export interface ReportStatus {
   estimated_wait_seconds?: number;
   progress_pct?: number;
   current_step?: string;
-  // Backend ReportStatusResponse fields
-  id?: string;
-  progress?: number;
-  message?: string;
-  completed?: boolean;
-  failed?: boolean;
-  error?: string | null;
 }
 
 export interface ModelBreakdown {

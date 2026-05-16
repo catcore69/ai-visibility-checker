@@ -20,7 +20,7 @@ async def generate_recommendations(
     competitors: list[str],
 ) -> list[dict]:
     """Генерирует 5 персонализированных рекомендаций (1 LLM-вызов)."""
-    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, base_url=settings.OPENAI_BASE_URL)
 
     weak_models = get_weak_models(analysis, brand_name)
     strong_models = get_strong_models(analysis, brand_name)

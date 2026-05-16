@@ -105,6 +105,11 @@ def get_model_breakdown(analysis: Analysis, brand_name: str) -> list[dict]:
                 "dominant_sentiment": dominant_sentiment,
                 "total_prompts": total,
                 "mentioned_count": len(mentioned),
+            "mentions": len(mentioned),
+            "prompts_tested": total,
+            "display_name": model_name,
+            "presence_rate": mention_rate,
+            "positive_count": sum(1 for r in mentioned if r.sentiment == "positive"),
             }
         )
 
@@ -146,6 +151,11 @@ def compare_with_competitors(
                 "score": score,
                 "presence_rate": presence,
                 "share_of_voice": sov,
+            "name": brand,
+            "sov": sov,
+            "models_found": 0,
+            "models_total": 0,
+            "dominant_sentiment": "neutral",
             }
         )
     return sorted(results, key=lambda x: x["score"], reverse=True)

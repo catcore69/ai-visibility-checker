@@ -12,7 +12,7 @@ logger = get_logger(__name__)
 
 async def generate_prompts(niche: dict[str, Any], count: int = 15) -> list[str]:
     """Генерирует список запросов для опроса LLM-моделей (1 вызов)."""
-    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, base_url=settings.OPENAI_BASE_URL)
 
     prompt = PROMPT_GENERATOR_PROMPT.format(
         category=niche.get("category", ""),
@@ -21,14 +21,17 @@ async def generate_prompts(niche: dict[str, Any], count: int = 15) -> list[str]:
         target_audience_description=niche.get("target_audience_description", ""),
     )
 
-    response = await client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.7,
-        max_tokens=800,
-    )
-
-    raw = response.choices[0].message.content or "[]"
+    try:
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            max_tokens=800,
+        )
+        raw = response.choices[0].message.content or "[]"
+    except Exception as exc:
+        logger.error("prompt_generator_llm_error", error=str(exc))
+        return niche.get("typical_user_questions", [])[:count]
 
     try:
         raw = raw.strip().strip("```json").strip("```").strip()

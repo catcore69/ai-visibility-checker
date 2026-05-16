@@ -186,10 +186,7 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
         # ШАГ 10: Workflow эксперта или авто-отправка
         if settings.EXPERT_REVIEW_BEFORE_SEND:
             await update_report_status(db, report_id, "awaiting_personal_note", progress=99)
-            try:
-                await telegram.notify_report_ready_for_review(report_fresh, score)
-            except Exception as tg_exc:
-                logger.error("telegram_notify_expert_failed", error=repr(tg_exc), error_type=type(tg_exc).__name__)
+            await telegram.notify_report_ready_for_review(report_fresh, score)
             # Авто-отправка запустится через Celery beat-таск после таймаута
             from app.tasks.generate_report import auto_send_report_after_timeout
             auto_send_report_after_timeout.apply_async(

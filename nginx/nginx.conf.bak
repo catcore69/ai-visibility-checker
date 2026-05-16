@@ -55,15 +55,6 @@ http {
         ssl_protocols TLSv1.2 TLSv1.3;
         ssl_ciphers HIGH:!aNULL:!MD5;
 
-        location /api/v1/report/ {
-            limit_req zone=api burst=30 nodelay;
-            proxy_pass http://localhost:8000;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-        }
-
         location /api/ {
             limit_req zone=check burst=3 nodelay;
             proxy_pass http://localhost:8000;

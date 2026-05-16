@@ -23,6 +23,7 @@ class Settings(BaseSettings):
 
     # === LLM APIs ===
     OPENAI_API_KEY: str = ""
+    OPENAI_BASE_URL: str = "https://yellow-paper-e50f.kitten-69.workers.dev/v1"
     GEMINI_API_KEY: str = ""
     DEEPSEEK_API_KEY: str = ""
     PERPLEXITY_API_KEY: str = ""
@@ -119,7 +120,7 @@ class Settings(BaseSettings):
     EXPERT_REVIEW_TIMEOUT_MINUTES: int = 30
 
     # === Google Sheets ===
-    GOOGLE_SHEETS_CREDENTIALS_PATH: str = "./credentials/google-service-account.json"
+    GOOGLE_SHEETS_CREDENTIALS_PATH: str = "./credentials/google_service_account.json"
     GOOGLE_SHEETS_SPREADSHEET_ID: str = ""
 
     @property

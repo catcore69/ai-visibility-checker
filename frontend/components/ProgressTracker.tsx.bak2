@@ -26,7 +26,7 @@ export default function ProgressTracker({ status }: Props) {
 
   const currentStep = status.current_step ?? status.status;
   const stepLabel   = STEP_LABELS[currentStep] ?? 'Обрабатываем...';
-  const progress    = (status as any).progress ?? status.progress_pct ?? STEP_PROGRESS[currentStep] ?? 5;
+  const progress    = status.progress_pct ?? STEP_PROGRESS[currentStep] ?? 5;
 
   const steps = [
     { key: 'detecting_niche',     label: 'Определение ниши' },

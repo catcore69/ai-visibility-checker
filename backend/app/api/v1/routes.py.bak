@@ -48,26 +48,23 @@ async def start_check(
 ) -> CheckResponse:
     """Принимает заявку, отправляет email верификации. Pipeline стартует только после клика."""
 
-    ip = request.headers.get("X-Real-IP") or request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or (request.client.host if request.client else "0.0.0.0")
+    ip = request.client.host if request.client else "0.0.0.0"
     brand_name = body.brand_name or extract_brand_from_url(body.url)
 
     # Многослойная проверка защиты от абуза
-  #  can_create, reason = await check_can_create_report(
-    #    redis=redis,
-      #  email=str(body.email),
-        #url=body.url,
-        #brand=brand_name,
-        #fingerprint=body.browser_fingerprint,
-        #ip=ip,
-        #honeypot_value=body.website_url_honeypot,
-        #turnstile_token=body.turnstile_token,
-    #)
-    #if not can_create:
-      #  logger.warning("rate_limit_hit", reason=reason, ip=ip, email=str(body.email))
-        #raise HTTPException(429, f"Слишком много запросов: {reason}")
-# Временно разрешаем все запросы
-    can_create = True
-    reason = "disabled_bypass" # Временно разрешаем все запросы
+    can_create, reason = await check_can_create_report(
+        redis=redis,
+        email=str(body.email),
+        url=body.url,
+        brand=brand_name,
+        fingerprint=body.browser_fingerprint,
+        ip=ip,
+        honeypot_value=body.website_url_honeypot,
+        turnstile_token=body.turnstile_token,
+    )
+    if not can_create:
+        logger.warning("rate_limit_hit", reason=reason, ip=ip, email=str(body.email))
+        raise HTTPException(429, f"Слишком много запросов: {reason}")
 
     verification_token = secrets.token_urlsafe(32)
     expires_at = datetime.utcnow() + timedelta(hours=24)
@@ -148,8 +145,8 @@ async def verify_email_and_start(
     )
 
     # ЗАПУСКАЕМ pipeline
-    from app.celery_app import celery_app
-    celery_app.send_task('app.tasks.generate_report.generate_report_task', args=[str(report.id)])
+    from app.tasks.generate_report import generate_report_task
+    generate_report_task.delay(str(report.id))
 
     # Уведомления
     from app.integrations.telegram import TelegramNotifier
@@ -215,7 +212,7 @@ async def get_full_report(
 ) -> ReportFull:
     """Полные данные отчёта для онлайн-просмотра."""
     report = await get_report(db, report_id)
-    if not report or report.status not in ("completed", "awaiting_personal_note"):
+    if not report or report.status != "completed":
         raise HTTPException(404, "Отчёт не найден или ещё не готов.")
 
     await log_event(db, report_id, "report_viewed")

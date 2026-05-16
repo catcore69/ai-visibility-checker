@@ -7,7 +7,7 @@ from app.llm_pollers.base import BasePoller, RateLimitError
 class GeminiPoller(BasePoller):
     name = "gemini"
     display_name = "Gemini"
-    model = "gemini-2.0-flash-exp"
+    model = "gemini-2.0-flash"
 
     def __init__(self, cache, config):
         super().__init__(cache, config)

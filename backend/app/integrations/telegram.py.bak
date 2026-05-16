@@ -1,6 +1,5 @@
 from uuid import UUID
 
-import traceback
 import httpx
 
 from app.utils.logger import get_logger
@@ -29,7 +28,7 @@ class TelegramNotifier:
                     },
                 )
         except Exception as exc:
-            logger.error("telegram_notify_failed", error=repr(exc), error_type=type(exc).__name__, tb=traceback.format_exc()[:500])
+            logger.error("telegram_notify_failed", error=str(exc))
 
     async def _send_with_keyboard(self, message: str, keyboard: list) -> None:
         """Отправляет сообщение с inline-кнопками."""
@@ -48,7 +47,7 @@ class TelegramNotifier:
                     },
                 )
         except Exception as exc:
-            logger.error("telegram_keyboard_failed", error=repr(exc), error_type=type(exc).__name__, tb=traceback.format_exc()[:500])
+            logger.error("telegram_keyboard_failed", error=repr(exc))
 
     async def notify_pending_verification(self, report) -> None:
         await self._send(

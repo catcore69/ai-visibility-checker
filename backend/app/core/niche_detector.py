@@ -12,7 +12,7 @@ logger = get_logger(__name__)
 
 async def detect_niche(url: str, brand_name: str, region: str) -> dict[str, Any]:
     """Определяет нишу бизнеса через LLM (1 вызов)."""
-    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, base_url=settings.OPENAI_BASE_URL)
 
     prompt = NICHE_DETECTOR_PROMPT.format(
         url=url, brand_name=brand_name, region=region

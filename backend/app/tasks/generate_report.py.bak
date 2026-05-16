@@ -1,0 +1,96 @@
+import asyncio
+from datetime import datetime, timedelta
+from uuid import UUID
+
+from app.celery_app import celery_app
+from app.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+
+def _run_async(coro):
+    """Запускает async корутину из синхронного Celery-таска, используя asyncio.run()."""
+    return asyncio.run(coro)
+
+
+@celery_app.task(
+    name="app.tasks.generate_report.generate_report_task",
+    bind=True,
+    max_retries=2,
+    default_retry_delay=60,
+)
+def generate_report_task(self, report_id: str) -> None:
+    """Запускает главный pipeline генерации отчёта."""
+    async def _run():
+        from app.db.session import AsyncSessionLocal
+        from app.core.pipeline import generate_report
+
+        async with AsyncSessionLocal() as db:
+            await generate_report(UUID(report_id), db)
+
+    try:
+        _run_async(_run())
+    except Exception as exc:
+        logger.error("generate_report_task_failed", report_id=report_id, error=str(exc))
+        raise self.retry(exc=exc) from exc
+
+
+@celery_app.task(name="app.tasks.generate_report.auto_send_report_after_timeout")
+def auto_send_report_after_timeout(report_id: str) -> None:
+    """Авто-отправка отчёта если эксперт не отреагировал за EXPERT_REVIEW_TIMEOUT_MINUTES."""
+    async def _run():
+        from app.db.session import AsyncSessionLocal
+        from app.db.repositories.report_repo import get_report, update_report_status
+        from app.email.sender import EmailSender
+        from app.integrations.telegram import TelegramNotifier
+        from app.config import settings
+
+        async with AsyncSessionLocal() as db:
+            report = await get_report(db, UUID(report_id))
+            if not report:
+                return
+
+            # Отправляем только если всё ещё в статусе ожидания
+            if report.status != "awaiting_personal_note":
+                return
+
+            email_sender = EmailSender(settings)
+            await update_report_status(db, UUID(report_id), "sending_email", progress=99)
+            await email_sender.send_report_ready(report)
+            await update_report_status(db, UUID(report_id), "completed", progress=100)
+
+            telegram = TelegramNotifier(settings.TELEGRAM_BOT_TOKEN, settings.TELEGRAM_NOTIFY_CHAT_ID)
+            await telegram.notify_report_completed(report)
+
+            logger.info("auto_sent_report", report_id=report_id)
+
+    _run_async(_run())
+
+
+@celery_app.task(name="app.tasks.generate_report.cleanup_unverified_reports")
+def cleanup_unverified_reports() -> None:
+    """Удаляет неверифицированные заявки старше 24 часов."""
+    async def _run():
+        from app.db.session import AsyncSessionLocal
+        from app.db.repositories.report_repo import delete_old_unverified_reports
+
+        cutoff = datetime.utcnow() - timedelta(hours=25)
+        async with AsyncSessionLocal() as db:
+            deleted = await delete_old_unverified_reports(db, older_than=cutoff)
+        logger.info("cleanup_unverified", deleted=deleted)
+
+    _run_async(_run())
+
+
+@celery_app.task(name="app.tasks.generate_report.cleanup_expired_cache")
+def cleanup_expired_cache() -> None:
+    """Удаляет истёкшие записи из таблицы кэша БД."""
+    async def _run():
+        from app.db.session import AsyncSessionLocal
+        from app.db.repositories.cache_repo import delete_expired_cache
+
+        async with AsyncSessionLocal() as db:
+            deleted = await delete_expired_cache(db)
+        logger.info("cleanup_cache", deleted=deleted)
+
+    _run_async(_run())

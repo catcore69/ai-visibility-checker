@@ -2,19 +2,23 @@ import asyncio
 from datetime import datetime, timedelta
 from uuid import UUID
 
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+
 from app.celery_app import celery_app
+from app.config import settings
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
-def _run_async(coro):
-    """Запускает async coroutine из синхронного Celery-таска."""
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
+def _make_session_factory(engine):
+    return async_sessionmaker(
+        bind=engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autocommit=False,
+        autoflush=False,
+    )
 
 
 @celery_app.task(
@@ -26,14 +30,17 @@ def _run_async(coro):
 def generate_report_task(self, report_id: str) -> None:
     """Запускает главный pipeline генерации отчёта."""
     async def _run():
-        from app.db.session import AsyncSessionLocal
         from app.core.pipeline import generate_report
-
-        async with AsyncSessionLocal() as db:
-            await generate_report(UUID(report_id), db)
+        engine = create_async_engine(settings.DATABASE_URL, pool_pre_ping=True)
+        try:
+            AsyncSessionLocal = _make_session_factory(engine)
+            async with AsyncSessionLocal() as db:
+                await generate_report(UUID(report_id), db)
+        finally:
+            await engine.dispose()
 
     try:
-        _run_async(_run())
+        asyncio.run(_run())
     except Exception as exc:
         logger.error("generate_report_task_failed", report_id=report_id, error=str(exc))
         raise self.retry(exc=exc) from exc
@@ -43,58 +50,66 @@ def generate_report_task(self, report_id: str) -> None:
 def auto_send_report_after_timeout(report_id: str) -> None:
     """Авто-отправка отчёта если эксперт не отреагировал за EXPERT_REVIEW_TIMEOUT_MINUTES."""
     async def _run():
-        from app.db.session import AsyncSessionLocal
         from app.db.repositories.report_repo import get_report, update_report_status
         from app.email.sender import EmailSender
         from app.integrations.telegram import TelegramNotifier
-        from app.config import settings
+        engine = create_async_engine(settings.DATABASE_URL, pool_pre_ping=True)
+        try:
+            AsyncSessionLocal = _make_session_factory(engine)
+            async with AsyncSessionLocal() as db:
+                report = await get_report(db, UUID(report_id))
+                if not report:
+                    return
 
-        async with AsyncSessionLocal() as db:
-            report = await get_report(db, UUID(report_id))
-            if not report:
-                return
+                # Отправляем только если всё ещё в статусе ожидания
+                if report.status != "awaiting_personal_note":
+                    return
 
-            # Отправляем только если всё ещё в статусе ожидания
-            if report.status != "awaiting_personal_note":
-                return
+                email_sender = EmailSender(settings)
+                await update_report_status(db, UUID(report_id), "sending_email", progress=99)
+                await email_sender.send_report_ready(report)
+                await update_report_status(db, UUID(report_id), "completed", progress=100)
 
-            email_sender = EmailSender(settings)
-            await update_report_status(db, UUID(report_id), "sending_email", progress=99)
-            await email_sender.send_report_ready(report)
-            await update_report_status(db, UUID(report_id), "completed", progress=100)
+                telegram = TelegramNotifier(settings.TELEGRAM_BOT_TOKEN, settings.TELEGRAM_NOTIFY_CHAT_ID)
+                await telegram.notify_report_completed(report)
 
-            telegram = TelegramNotifier(settings.TELEGRAM_BOT_TOKEN, settings.TELEGRAM_NOTIFY_CHAT_ID)
-            await telegram.notify_report_completed(report)
+                logger.info("auto_sent_report", report_id=report_id)
+        finally:
+            await engine.dispose()
 
-            logger.info("auto_sent_report", report_id=report_id)
-
-    _run_async(_run())
+    asyncio.run(_run())
 
 
 @celery_app.task(name="app.tasks.generate_report.cleanup_unverified_reports")
 def cleanup_unverified_reports() -> None:
     """Удаляет неверифицированные заявки старше 24 часов."""
     async def _run():
-        from app.db.session import AsyncSessionLocal
         from app.db.repositories.report_repo import delete_old_unverified_reports
+        engine = create_async_engine(settings.DATABASE_URL, pool_pre_ping=True)
+        try:
+            AsyncSessionLocal = _make_session_factory(engine)
+            async with AsyncSessionLocal() as db:
+                cutoff = datetime.utcnow() - timedelta(hours=25)
+                deleted = await delete_old_unverified_reports(db, older_than=cutoff)
+                logger.info("cleanup_unverified", deleted=deleted)
+        finally:
+            await engine.dispose()
 
-        cutoff = datetime.utcnow() - timedelta(hours=25)
-        async with AsyncSessionLocal() as db:
-            deleted = await delete_old_unverified_reports(db, older_than=cutoff)
-        logger.info("cleanup_unverified", deleted=deleted)
-
-    _run_async(_run())
+    asyncio.run(_run())
 
 
 @celery_app.task(name="app.tasks.generate_report.cleanup_expired_cache")
 def cleanup_expired_cache() -> None:
     """Удаляет истёкшие записи из таблицы кэша БД."""
     async def _run():
-        from app.db.session import AsyncSessionLocal
         from app.db.repositories.cache_repo import delete_expired_cache
+        engine = create_async_engine(settings.DATABASE_URL, pool_pre_ping=True)
+        try:
+            AsyncSessionLocal = _make_session_factory(engine)
+            async with AsyncSessionLocal() as db:
+                deleted = await delete_expired_cache(db)
+                logger.info("cleanup_cache", deleted=deleted)
+        finally:
+            await engine.dispose()
 
-        async with AsyncSessionLocal() as db:
-            deleted = await delete_expired_cache(db)
-        logger.info("cleanup_cache", deleted=deleted)
-
-    _run_async(_run())
+    asyncio.run(_run())

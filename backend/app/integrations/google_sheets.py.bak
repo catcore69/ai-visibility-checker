@@ -43,7 +43,7 @@ class GoogleSheetsCRM:
                 report.url,
                 report.brand_name,
                 report.region,
-                (report.visibility_score if report.visibility_score is not None else ""),
+                report.visibility_score or "",
                 report.status,
                 event,
                 report.utm_source or "",

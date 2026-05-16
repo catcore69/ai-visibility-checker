@@ -10,7 +10,7 @@ class OpenAIPoller(BasePoller):
 
     def __init__(self, cache, config):
         super().__init__(cache, config)
-        self.client = AsyncOpenAI(api_key=config.OPENAI_API_KEY)
+        self.client = AsyncOpenAI(api_key=config.OPENAI_API_KEY, base_url=config.OPENAI_BASE_URL)
 
     async def _query_raw(self, prompt: str) -> str:
         try:

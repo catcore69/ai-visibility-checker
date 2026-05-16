@@ -41,7 +41,7 @@ services:
       - redis
     volumes:
       - ./backend/credentials:/app/credentials:ro
-    command: celery -A app.celery_app worker --loglevel=info --concurrency=4 --queues=reports
+    command: celery -A app.celery_app worker --loglevel=info --concurrency=2 --pool=threads --queues=reports
 
   beat:
     build:

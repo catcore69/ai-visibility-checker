@@ -13,7 +13,6 @@ RUN apt-get update && apt-get install -y \
     fonts-dejavu \
     fonts-liberation \
     curl \
-    postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -28,7 +27,4 @@ RUN mkdir -p /app/credentials /app/static/charts /app/static/fonts
 
 EXPOSE 8000
 
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-
-ENTRYPOINT ["/entrypoint.sh"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
