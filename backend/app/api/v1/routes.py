@@ -213,60 +213,23 @@ async def get_full_report(
     report_id: UUID,
     db: AsyncSession = Depends(get_db),
 ) -> ReportFull:
-    """Полные данные отчёта для онлайн-просмотра."""
+    """Полные данные отчёта для онлайн-просмотра.
+
+    Доступен в статусах `completed` и `awaiting_personal_note` —
+    чтобы эксперт мог открыть превью отчёта до отправки клиенту.
+    """
     report = await get_report(db, report_id)
     if not report or report.status not in ("completed", "awaiting_personal_note"):
         raise HTTPException(404, "Отчёт не найден или ещё не готов.")
 
     await log_event(db, report_id, "report_viewed")
 
-    # Восстанавливаем Analysis из JSON
     analysis_data = report.analysis or {"results": [], "all_citations": []}
     analysis = _restore_analysis(analysis_data)
 
-    competitors = report.competitors or []
-    all_brands = [report.brand_name] + competitors
-
-    comparison = compare_with_competitors(analysis, report.brand_name, all_brands)
-    model_breakdown = get_model_breakdown(analysis, report.brand_name)
-    top_sources = get_top_sources(analysis)
-
-    return ReportFull(
-        id=report.id,
-        brand_name=report.brand_name,
-        url=report.url,
-        region=report.region,
-        created_at=report.created_at,
-        visibility_score=report.visibility_score or 0,
-        presence_rate=report.presence_rate or 0,
-        share_of_voice=float(report.share_of_voice or 0),
-        niche=report.niche_data or {},
-        competitors=competitors,
-        comparison=[
-            {
-                "brand_name": c["brand_name"],
-                "score": c["score"],
-                "presence_rate": c["presence_rate"],
-                "share_of_voice": c["share_of_voice"],
-                "is_client": c["is_client"],
-            }
-            for c in comparison
-        ],
-        model_breakdown=model_breakdown,
-        recommendations=[
-            {
-                "priority": r.get("priority", 1),
-                "title": r.get("title", ""),
-                "description": r.get("description", ""),
-                "expected_impact": r.get("expected_impact", ""),
-                "effort": r.get("effort", "medium"),
-            }
-            for r in (report.recommendations or [])
-        ],
-        pdf_url=report.pdf_url,
-        top_sources=top_sources[:10],
-        expert_note=report.expert_note,
-    )
+    from app.core.report_view import build_report_full_payload
+    payload = build_report_full_payload(report, analysis)
+    return ReportFull(**payload)
 
 
 @router.get("/report/{report_id}/pdf")
@@ -274,7 +237,11 @@ async def download_pdf(
     report_id: UUID,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Pre-signed URL на PDF в S3 (1 час)."""
+    """Pre-signed URL на PDF в S3 (1 час).
+
+    Фронт (`frontend/lib/api.ts → getReportPdfUrl`) читает `data.url`,
+    поэтому возвращаем именно `url` (дублируем как `download_url` для совместимости).
+    """
     report = await get_report(db, report_id)
     if not report or not report.pdf_s3_key:
         raise HTTPException(404, "PDF не готов.")
@@ -285,7 +252,7 @@ async def download_pdf(
 
     await log_event(db, report_id, "pdf_downloaded")
 
-    return {"download_url": url, "expires_in": 3600}
+    return {"url": url, "download_url": url, "expires_in": 3600}
 
 
 @router.post("/report/{report_id}/cta")
@@ -341,6 +308,36 @@ async def resend_verification_email(
 
     await redis.set(resend_key, "1", ttl=60)
     return {"sent": True}
+
+
+@router.post("/telegram/webhook/{secret}")
+async def telegram_webhook(
+    secret: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Webhook от Telegram: обрабатываем callback_query и команды эксперта.
+
+    URL: POST /api/v1/telegram/webhook/{secret}
+    secret = sha256(TELEGRAM_BOT_TOKEN)[:32] — см. integrations/telegram_webhook.py.
+    """
+    from app.integrations.telegram_webhook import expected_webhook_secret, handle_update
+
+    expected = expected_webhook_secret()
+    if not expected or secret != expected:
+        raise HTTPException(403, "Invalid webhook secret")
+
+    try:
+        update = await request.json()
+    except Exception:
+        update = {}
+
+    try:
+        await handle_update(update, db)
+    except Exception as exc:
+        logger.error("telegram_webhook_handler_failed", error=repr(exc), error_type=type(exc).__name__)
+        # Telegram считает любой не-200 за повтор. Отдаём 200, чтобы не зациклить.
+    return {"ok": True}
 
 
 @router.post("/internal/report/{report_id}/action", dependencies=[Depends(verify_internal_token)])

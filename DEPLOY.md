@@ -218,7 +218,25 @@ docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
 
 ---
 
-## 12. Проверить работу
+## 12. Зарегистрировать Telegram webhook
+
+Чтобы инлайн-кнопки и команды эксперта (`/send`, `/hold`, `/note`) работали,
+нужно один раз сообщить Telegram-у адрес нашего вебхука:
+
+```bash
+docker compose -f docker-compose.prod.yml exec backend \
+    python -m scripts.set_telegram_webhook https://your-domain.ru
+```
+
+Скрипт сам посчитает секрет (sha256 от `TELEGRAM_BOT_TOKEN`) и зарегистрирует
+URL вида `https://your-domain.ru/api/v1/telegram/webhook/<secret>`.
+В выводе должен быть `"ok": true` и `getWebhookInfo` с этим URL.
+
+Если меняешь домен или ротируешь `TELEGRAM_BOT_TOKEN` — запусти скрипт снова.
+
+---
+
+## 13. Проверить работу
 
 ```bash
 # Health check

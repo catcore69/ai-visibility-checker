@@ -26,42 +26,66 @@ export function getRandomFacts(count = 3): string[] {
   return shuffled.slice(0, count);
 }
 
+/**
+ * Названия статусов идут СТРОГО как их эмитит backend/app/core/pipeline.py.
+ * Если меняешь имена в pipeline — обнови оба словаря.
+ */
 export const STEP_LABELS: Record<string, string> = {
-  queued:             'В очереди на проверку',
-  detecting_niche:    'Определяем нишу и рынок',
-  finding_competitors:'Ищем конкурентов',
-  generating_prompts: 'Генерируем поисковые запросы',
-  polling_models:     'Опрашиваем ИИ-ассистентов',
-  analyzing:          'Анализируем упоминания',
-  scoring:            'Рассчитываем AI Visibility Score',
-  building_report:    'Формируем PDF-отчёт',
-  uploading:          'Сохраняем отчёт',
-  sending_email:      'Отправляем на почту',
-  done:               'Готово!',
+  pending_verification:       'Ожидание подтверждения email',
+  verification_complete:      'Email подтверждён, ставим в очередь',
+  pending:                    'В очереди на проверку',
+  queued:                     'В очереди на проверку',
+  niche_detection:            'Определяем нишу и рынок',
+  competitor_discovery:       'Ищем конкурентов',
+  prompt_generation:          'Генерируем поисковые запросы',
+  polling_models:             'Опрашиваем ИИ-ассистентов',
+  analyzing_responses:        'Анализируем упоминания',
+  calculating_score:          'Рассчитываем AI Visibility Score',
+  generating_recommendations: 'Готовим рекомендации',
+  building_pdf:               'Формируем PDF-отчёт',
+  awaiting_personal_note:     'Эксперт добавляет личную заметку',
+  sending_email:              'Отправляем на почту',
+  completed:                  'Готово!',
+  failed:                     'Ошибка',
 };
 
 export const STEP_PROGRESS: Record<string, number> = {
-  queued:              5,
-  detecting_niche:    15,
-  finding_competitors:25,
-  generating_prompts: 35,
-  polling_models:     60,
-  analyzing:          75,
-  scoring:            82,
-  building_report:    90,
-  uploading:          95,
-  sending_email:      98,
-  done:              100,
-  niche_detected:             5,
-  competitors_found:         15,
-  prompts_generated:         25,
-  analyzing_responses:       70,
-  calculating_score:         85,
-  generating_recommendations:92,
-  building_pdf:              95,
-  awaiting_personal_note:    99,
-  completed:                100,
-  failed:                     0,
-  pending_verification:       0,
-  email_verified:             3,
+  pending_verification:        0,
+  verification_complete:       3,
+  pending:                     3,
+  queued:                      3,
+  niche_detection:             5,
+  competitor_discovery:       15,
+  prompt_generation:          25,
+  polling_models:             35,
+  analyzing_responses:        70,
+  calculating_score:          85,
+  generating_recommendations: 92,
+  building_pdf:               96,
+  awaiting_personal_note:     99,
+  sending_email:              99,
+  completed:                 100,
+  failed:                      0,
+};
+
+/**
+ * Карта status → индекс шага в UI-списке `ProgressTracker.steps[]`.
+ * Несколько внутренних статусов мапятся на один визуальный шаг.
+ *
+ * Важно: на стадии awaiting_personal_note / sending_email PDF уже физически
+ * собран, поэтому шаги «Анализ» и «Формирование отчёта» помечаем как done
+ * (индекс = steps.length). Клиент видит «всё готово, ждём эксперта».
+ */
+export const STEP_INDEX: Record<string, number> = {
+  niche_detection:             0,
+  competitor_discovery:        1,
+  prompt_generation:           2,
+  polling_models:              3,
+  analyzing_responses:         4,
+  calculating_score:           4,
+  generating_recommendations:  4,
+  building_pdf:                5,
+  awaiting_personal_note:      6, // PDF уже готов, ждём эксперта
+  sending_email:               6,
+  completed:                   6, // > последнего индекса = все шаги done
 };

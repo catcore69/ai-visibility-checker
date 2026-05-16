@@ -22,13 +22,17 @@ export default function StatusPage() {
       const data = await getReportStatus(reportId);
       setStatus(data);
 
-      if (data.status === 'done') {
+      // PDF уже физически готов начиная со статуса `awaiting_personal_note`.
+      // Бэк отдаёт `/report/{id}` в этом статусе, поэтому отправляем клиента
+      // смотреть отчёт сразу. Финальное письмо с заметкой эксперта догонит позже.
+      const READY_STATUSES = ['awaiting_personal_note', 'sending_email', 'completed'];
+      if (READY_STATUSES.includes(data.status) || (data as any).completed === true) {
         router.replace(`/otchet/${reportId}`);
         return;
       }
 
-      if (data.status === 'error') {
-        setError('Произошла ошибка при формировании отчёта. Попробуйте снова.');
+      if (data.status === 'failed' || data.status === 'error' || (data as any).failed === true) {
+        setError((data as any).error || 'Произошла ошибка при формировании отчёта. Попробуйте снова.');
         return;
       }
 

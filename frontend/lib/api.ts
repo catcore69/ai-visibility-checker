@@ -31,24 +31,25 @@ export interface CheckResponse {
 }
 
 export interface ReportStatus {
-  report_id: string;
-  status:
-    | 'pending_verification'
-    | 'queued'
-    | 'running'
-    | 'done'
-    | 'error';
-  queue_position?: number;
-  estimated_wait_seconds?: number;
-  progress_pct?: number;
-  current_step?: string;
-  // Backend ReportStatusResponse fields
+  /** UUID отчёта (от бэка — `id`). */
   id?: string;
+  report_id?: string;
+
+  /** Любой из статусов pipeline (см. backend/app/core/pipeline.py). */
+  status: string;
+
+  /** Прогресс 0–100 (поле бэка — `progress`). */
   progress?: number;
+  progress_pct?: number;
+
   message?: string;
+  current_step?: string;
   completed?: boolean;
   failed?: boolean;
   error?: string | null;
+
+  queue_position?: number;
+  estimated_wait_seconds?: number;
 }
 
 export interface ModelBreakdown {

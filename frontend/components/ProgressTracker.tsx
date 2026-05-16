@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { STEP_LABELS, STEP_PROGRESS, LOADING_FACTS } from '@/lib/loading-facts';
+import { STEP_LABELS, STEP_PROGRESS, STEP_INDEX, LOADING_FACTS } from '@/lib/loading-facts';
 import type { ReportStatus } from '@/lib/api';
 
 interface Props {
@@ -27,18 +27,20 @@ export default function ProgressTracker({ status }: Props) {
   const currentStep = status.current_step ?? status.status;
   const stepLabel   = STEP_LABELS[currentStep] ?? 'Обрабатываем...';
   const progress    = (status as any).progress ?? status.progress_pct ?? STEP_PROGRESS[currentStep] ?? 5;
+  const isDoneAll   = currentStep === 'completed' || (status as any).completed === true;
 
   const steps = [
-    { key: 'detecting_niche',     label: 'Определение ниши' },
-    { key: 'finding_competitors', label: 'Поиск конкурентов' },
-    { key: 'generating_prompts',  label: 'Генерация запросов' },
-    { key: 'polling_models',      label: 'Опрос ИИ-ассистентов' },
-    { key: 'analyzing',           label: 'Анализ упоминаний' },
-    { key: 'building_report',     label: 'Формирование отчёта' },
+    { key: 'niche_detection',      label: 'Определение ниши' },
+    { key: 'competitor_discovery', label: 'Поиск конкурентов' },
+    { key: 'prompt_generation',    label: 'Генерация запросов' },
+    { key: 'polling_models',       label: 'Опрос ИИ-ассистентов' },
+    { key: 'analyzing_responses',  label: 'Анализ упоминаний' },
+    { key: 'building_pdf',         label: 'Формирование отчёта' },
   ];
 
-  const stepKeys = steps.map(s => s.key);
-  const currentStepIndex = stepKeys.indexOf(currentStep);
+  const currentStepIndex = isDoneAll
+    ? steps.length // все шаги done
+    : STEP_INDEX[currentStep] ?? -1;
 
   return (
     <div className="w-full max-w-xl mx-auto flex flex-col gap-6">
@@ -64,9 +66,9 @@ export default function ProgressTracker({ status }: Props) {
       {/* Step list */}
       <div className="flex flex-col gap-2">
         {steps.map((step, idx) => {
-          const isDone    = currentStepIndex > idx || status.status === 'done';
-          const isActive  = currentStepIndex === idx && status.status !== 'done';
-          const isPending = currentStepIndex < idx && status.status !== 'done';
+          const isDone    = currentStepIndex > idx || isDoneAll;
+          const isActive  = currentStepIndex === idx && !isDoneAll;
+          const isPending = currentStepIndex < idx && !isDoneAll;
 
           return (
             <div key={step.key} className="flex items-center gap-3">
@@ -94,6 +96,15 @@ export default function ProgressTracker({ status }: Props) {
           );
         })}
       </div>
+
+      {/* Awaiting expert note hint */}
+      {currentStep === 'awaiting_personal_note' && (
+        <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-700">
+          Отчёт почти готов — эксперт добавляет персональную заметку.
+          Это занимает до {Math.ceil(((status as any).estimated_wait_seconds ?? 30 * 60) / 60)} минут.
+          Письмо придёт сразу после отправки.
+        </div>
+      )}
 
       {/* Queue position */}
       {status.queue_position && status.queue_position > 1 && (
