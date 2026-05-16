@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, HttpUrl, field_validator
+from pydantic import BaseModel, EmailStr, Field, HttpUrl, field_validator
 
 
 class CheckRequest(BaseModel):
@@ -10,12 +10,17 @@ class CheckRequest(BaseModel):
     brand_name: Optional[str] = None
     region: str = "Россия"
     email: EmailStr
+    # Подсказка ниши от клиента из формы — приоритет над авто-детектом.
+    # Принимаем под двумя именами (никакой alias-магии — оба явных поля).
+    niche_hint: Optional[str] = Field(default=None, alias="niche")
     browser_fingerprint: Optional[str] = None
     turnstile_token: str = ""
     website_url_honeypot: str = ""  # Honeypot-поле
     utm_source: Optional[str] = None
     utm_medium: Optional[str] = None
     utm_campaign: Optional[str] = None
+
+    model_config = {"populate_by_name": True}
 
     @field_validator("url")
     @classmethod

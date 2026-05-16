@@ -122,8 +122,11 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
 
         await update_report_status(db, report_id, "niche_detection", progress=5)
 
-        # ШАГ 2: Ниша
-        niche = await detect_niche(report.url, report.brand_name, report.region)
+        # ШАГ 2: Ниша — учитываем подсказку клиента из формы (niche_data.user_hint).
+        user_hint = None
+        if isinstance(report.niche_data, dict):
+            user_hint = report.niche_data.get("user_hint")
+        niche = await detect_niche(report.url, report.brand_name, report.region, user_hint=user_hint)
         await update_report_field(db, report_id, niche_data=niche)
         await update_report_status(db, report_id, "competitor_discovery", progress=15)
 

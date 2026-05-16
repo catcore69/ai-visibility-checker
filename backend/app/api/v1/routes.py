@@ -73,6 +73,11 @@ async def start_check(
     expires_at = datetime.utcnow() + timedelta(hours=24)
     domain_key, domain_brand_key = canonical_keys(body.url, brand_name)
 
+    # Подсказка ниши от клиента — сохраняем в niche_data как user_hint,
+    # чтобы pipeline (detect_niche) мог её учесть.
+    niche_hint = (body.niche_hint or "").strip() or None
+    niche_data_initial = {"user_hint": niche_hint} if niche_hint else None
+
     report = Report(
         url=body.url,
         url_normalized=normalize_url(body.url),
@@ -91,6 +96,7 @@ async def start_check(
         utm_source=body.utm_source,
         utm_medium=body.utm_medium,
         utm_campaign=body.utm_campaign,
+        niche_data=niche_data_initial,
     )
     await create_report(db, report)
 
