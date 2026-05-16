@@ -18,7 +18,10 @@ class TelegramNotifier:
     def __init__(self, bot_token: str, notify_chat_id: str):
         self.bot_token = bot_token
         self.notify_chat_id = notify_chat_id
-        self.api_url = f"https://api.telegram.org/bot{bot_token}"
+        # Используем настраиваемую базу (по умолчанию api.telegram.org),
+        # чтобы можно было пустить через Cloudflare Worker relay.
+        base = (settings.TELEGRAM_API_BASE or "https://api.telegram.org").rstrip("/")
+        self.api_url = f"{base}/bot{bot_token}"
 
     async def _send(self, message: str, parse_mode: str = "HTML") -> None:
         if not self.bot_token or not self.notify_chat_id:

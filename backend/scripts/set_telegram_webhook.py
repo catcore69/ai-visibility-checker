@@ -36,8 +36,11 @@ async def set_webhook(base_url: str, dry_run: bool = False) -> None:
         print("(dry-run, ничего не отправляем)")
         return
 
-    api = f"https://api.telegram.org/bot{token}"
+    base = (settings.TELEGRAM_API_BASE or "https://api.telegram.org").rstrip("/")
+    api = f"{base}/bot{token}"
     proxy = settings.TELEGRAM_PROXY_URL or None
+    if base != "https://api.telegram.org":
+        print(f"Using relay: {base}")
     if proxy:
         print(f"Using proxy: {proxy.split('@')[-1]}")
     async with httpx.AsyncClient(timeout=15.0, proxy=proxy) as client:

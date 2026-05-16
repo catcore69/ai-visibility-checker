@@ -50,7 +50,8 @@ def expected_webhook_secret() -> str:
 async def _tg_api(method: str, payload: dict) -> None:
     if not settings.TELEGRAM_BOT_TOKEN:
         return
-    url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/{method}"
+    base = (settings.TELEGRAM_API_BASE or "https://api.telegram.org").rstrip("/")
+    url = f"{base}/bot{settings.TELEGRAM_BOT_TOKEN}/{method}"
     try:
         async with httpx.AsyncClient(timeout=10.0, proxy=settings.TELEGRAM_PROXY_URL or None) as client:
             await client.post(url, json=payload)

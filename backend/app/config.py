@@ -114,9 +114,14 @@ class Settings(BaseSettings):
     # === Telegram ===
     TELEGRAM_BOT_TOKEN: str = ""
     TELEGRAM_NOTIFY_CHAT_ID: str = ""
-    # Прокси, если api.telegram.org недоступен с VPS (например, RU/BY провайдеры).
-    # Формат httpx: "http://user:pass@host:port" или "socks5://host:port".
+    # Прокси для api.telegram.org, если провайдер блокирует прямой доступ.
+    # Формат httpx: "http://user:pass@host:port" (для socks5 нужен httpx[socks]).
     TELEGRAM_PROXY_URL: str = ""
+    # Альтернатива прокси — relay через Cloudflare Worker (бесплатно):
+    # деплоим worker, который форвардит к api.telegram.org, и подставляем его URL.
+    # Пример: https://tg-relay.username.workers.dev
+    # Подробнее: см. infra/cloudflare-workers/telegram-relay.js
+    TELEGRAM_API_BASE: str = "https://api.telegram.org"
 
     # === Workflow эксперта ===
     EXPERT_REVIEW_BEFORE_SEND: bool = True
