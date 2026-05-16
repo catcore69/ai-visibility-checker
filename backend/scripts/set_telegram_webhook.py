@@ -37,7 +37,10 @@ async def set_webhook(base_url: str, dry_run: bool = False) -> None:
         return
 
     api = f"https://api.telegram.org/bot{token}"
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    proxy = settings.TELEGRAM_PROXY_URL or None
+    if proxy:
+        print(f"Using proxy: {proxy.split('@')[-1]}")
+    async with httpx.AsyncClient(timeout=15.0, proxy=proxy) as client:
         r = await client.post(f"{api}/setWebhook", json={
             "url": webhook_url,
             "allowed_updates": ["callback_query", "message"],

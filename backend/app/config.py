@@ -114,6 +114,9 @@ class Settings(BaseSettings):
     # === Telegram ===
     TELEGRAM_BOT_TOKEN: str = ""
     TELEGRAM_NOTIFY_CHAT_ID: str = ""
+    # Прокси, если api.telegram.org недоступен с VPS (например, RU/BY провайдеры).
+    # Формат httpx: "http://user:pass@host:port" или "socks5://host:port".
+    TELEGRAM_PROXY_URL: str = ""
 
     # === Workflow эксперта ===
     EXPERT_REVIEW_BEFORE_SEND: bool = True

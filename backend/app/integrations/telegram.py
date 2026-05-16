@@ -3,9 +3,15 @@ from uuid import UUID
 import traceback
 import httpx
 
+from app.config import settings
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _proxy() -> str | None:
+    """Опциональный прокси для api.telegram.org (если RU/BY-провайдер режет)."""
+    return settings.TELEGRAM_PROXY_URL or None
 
 
 class TelegramNotifier:
@@ -18,7 +24,7 @@ class TelegramNotifier:
         if not self.bot_token or not self.notify_chat_id:
             return
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with httpx.AsyncClient(timeout=10.0, proxy=_proxy()) as client:
                 await client.post(
                     f"{self.api_url}/sendMessage",
                     json={
@@ -36,7 +42,7 @@ class TelegramNotifier:
         if not self.bot_token or not self.notify_chat_id:
             return
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with httpx.AsyncClient(timeout=10.0, proxy=_proxy()) as client:
                 await client.post(
                     f"{self.api_url}/sendMessage",
                     json={

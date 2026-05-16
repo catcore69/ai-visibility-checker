@@ -52,7 +52,7 @@ async def _tg_api(method: str, payload: dict) -> None:
         return
     url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/{method}"
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0, proxy=settings.TELEGRAM_PROXY_URL or None) as client:
             await client.post(url, json=payload)
     except Exception as exc:
         logger.error("tg_api_failed", method=method, error=repr(exc))
