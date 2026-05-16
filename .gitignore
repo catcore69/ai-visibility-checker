@@ -86,3 +86,8 @@ backend/static/charts/
 # SSL certificates
 nginx/ssl/
 nginx/certbot/
+
+*.save
+*.save.*
+*.backup
+*.old
