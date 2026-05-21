@@ -2,11 +2,12 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'AI Visibility Checker — проверьте видимость вашего бренда в ИИ',
+  title: 'CatCore — AI Visibility Checker',
   description:
-    'Бесплатный инструмент: узнайте, как часто ИИ-ассистенты (ChatGPT, YandexGPT, GigaChat, Gemini и другие) упоминают ваш бренд по сравнению с конкурентами.',
+    'Бесплатный инструмент CatCore GEO Studio: проверьте, как ИИ-ассистенты (ChatGPT, YandexGPT, GigaChat, Gemini и др.) видят ваш бренд по сравнению с конкурентами.',
+  icons: { icon: '/favicon.ico' },
   openGraph: {
-    title: 'AI Visibility Checker',
+    title: 'CatCore — AI Visibility Checker',
     description: 'Проверьте, как ИИ-ассистенты видят ваш бренд',
     type: 'website',
   },
@@ -23,7 +24,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           defer
         />
       </head>
-      <body>{children}</body>
+      <body className="bg-brand-bg text-brand-text antialiased">{children}</body>
     </html>
   );
 }

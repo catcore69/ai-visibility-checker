@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { submitCheck, type CheckPayload } from '@/lib/api';
 import { getFingerprint } from '@/lib/fingerprint';
@@ -21,208 +21,175 @@ export default function HeroForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const [websiteUrl, setWebsiteUrl]   = useState('');
-  const [brandName, setBrandName]     = useState('');
-  const [niche, setNiche]             = useState('');
-  const [email, setEmail]             = useState('');
-  const [hpName, setHpName]           = useState(''); // honeypot
-  const [loading, setLoading]         = useState(false);
-  const [error, setError]             = useState('');
-  const [turnstileToken, setTurnstileToken] = useState('');
+  const [websiteUrl, setWebsiteUrl] = useState('');
+  const [brandName, setBrandName]   = useState('');
+  const [niche, setNiche]           = useState('');
+  const [email, setEmail]           = useState('');
+  const [hpName, setHpName]         = useState(''); // honeypot
+  const [loading, setLoading]       = useState(false);
+  const [error, setError]           = useState('');
+  const [turnstileToken] = useState('');
 
-  const turnstileRef   = useRef<HTMLDivElement>(null);
-  const widgetIdRef    = useRef<string | null>(null);
-  const mountedRef     = useRef(false);
+  // Turnstile сейчас отключён (см. бэкенд) — компонент сохраняем для будущего включения.
+  const widgetIdRef = useRef<string | null>(null);
 
-  // Mount Turnstile once
-//  useEffect(() => {
-  //  if (mountedRef.current || !SITE_KEY) return;
-    //mountedRef.current = true;
+  const handleSubmit = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      setError('');
 
-    //const tryRender = () => {
-      //if (!turnstileRef.current || !window.turnstile) {
-        //setTimeout(tryRender, 300);
-        //return;
-      //}
-      //widgetIdRef.current = window.turnstile.render(turnstileRef.current, {
-        //sitekey: SITE_KEY,
-        //callback: (token: string) => setTurnstileToken(token),
-        //'expired-callback': () => setTurnstileToken(''),
-        //theme: 'light',
-        //size: 'normal',
-      //});
-    //};
-    //tryRender();
+      if (hpName) return; // honeypot tripped
 
-    //return () => {
-      //if (widgetIdRef.current) {
-        //window.turnstile?.remove(widgetIdRef.current);
-      //}
-    //};
-  //}, []);
-
-  const handleSubmit = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-
-    // Honeypot check (client-side early exit, server also checks)
-    if (hpName) return;
-
-    if (!websiteUrl || !brandName || !niche || !email) {
-      setError('Пожалуйста, заполните все поля.');
-      return;
-    }
-    //if (SITE_KEY && !turnstileToken) {
-      //setError('Пожалуйста, подождите — загружается проверка защиты от ботов.');
-      //return;
-    //}
-
-    setLoading(true);
-    try {
-      const fingerprintId = await getFingerprint();
-
-      const payload: CheckPayload = {
-        url:     websiteUrl.trim(),
-        brand_name:      brandName.trim(),
-        niche:           niche.trim(),
-        email:           email.trim().toLowerCase(),
-	turnstile_token: '',      
-        fingerprint_id:  fingerprintId,
-        hp_name:         hpName,
-        utm_source:      searchParams.get('utm_source') || undefined,
-        utm_medium:      searchParams.get('utm_medium') || undefined,
-        utm_campaign:    searchParams.get('utm_campaign') || undefined,
-      };
-
-      const result = await submitCheck(payload);
-      router.push(`/proverka/verify-email?id=${result.report_id}&email=${encodeURIComponent(email)}`);
-    } catch (err: unknown) {
-      // Reset turnstile
-//      if (widgetIdRef.current) window.turnstile?.reset(widgetIdRef.current);
-  //    setTurnstileToken('');
-
-      const axiosErr = err as { response?: { data?: { detail?: string } }; message?: string };
-      const detail = axiosErr.response?.data?.detail;
-      if (typeof detail === 'string') {
-        setError(detail);
-      } else if (Array.isArray(detail)) {
-        setError((detail as { msg: string }[]).map(d => d.msg).join(', '));
-      } else {
-        setError('Что-то пошло не так. Попробуйте ещё раз.');
+      if (!websiteUrl || !brandName || !niche || !email) {
+        setError('Пожалуйста, заполните все поля.');
+        return;
       }
-    } finally {
-      setLoading(false);
-    }
-  }, [websiteUrl, brandName, niche, email, hpName, turnstileToken, router, searchParams]);
+
+      setLoading(true);
+      try {
+        const fingerprintId = await getFingerprint();
+
+        const payload: CheckPayload = {
+          url: websiteUrl.trim(),
+          brand_name: brandName.trim(),
+          niche: niche.trim(),
+          email: email.trim().toLowerCase(),
+          turnstile_token: '',
+          fingerprint_id: fingerprintId,
+          hp_name: hpName,
+          utm_source: searchParams.get('utm_source') || undefined,
+          utm_medium: searchParams.get('utm_medium') || undefined,
+          utm_campaign: searchParams.get('utm_campaign') || undefined,
+        };
+
+        const result = await submitCheck(payload);
+        router.push(
+          `/proverka/verify-email?id=${result.report_id}&email=${encodeURIComponent(email)}`,
+        );
+      } catch (err: unknown) {
+        if (widgetIdRef.current) window.turnstile?.reset(widgetIdRef.current);
+        const axiosErr = err as { response?: { data?: { detail?: string } }; message?: string };
+        const detail = axiosErr.response?.data?.detail;
+        if (typeof detail === 'string') {
+          setError(detail);
+        } else if (Array.isArray(detail)) {
+          setError((detail as { msg: string }[]).map((d) => d.msg).join(', '));
+        } else {
+          setError('Что-то пошло не так. Попробуйте ещё раз.');
+        }
+      } finally {
+        setLoading(false);
+      }
+    },
+    [websiteUrl, brandName, niche, email, hpName, turnstileToken, router, searchParams],
+  );
 
   return (
-    <form onSubmit={handleSubmit} className="w-full max-w-lg mx-auto flex flex-col gap-4" noValidate>
-      {/* Honeypot – hidden from real users */}
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4" noValidate>
+      {/* Honeypot */}
       <div className="hp-field" aria-hidden="true">
         <input
           type="text"
           name="name"
           value={hpName}
-          onChange={e => setHpName(e.target.value)}
+          onChange={(e) => setHpName(e.target.value)}
           tabIndex={-1}
           autoComplete="off"
         />
       </div>
 
-      {/* Website URL */}
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="website_url" className="text-sm font-medium text-gray-900">
-          Сайт вашей компании
-        </label>
-        <input
-          id="website_url"
-          type="url"
-          placeholder="https://example.com"
-          value={websiteUrl}
-          onChange={e => setWebsiteUrl(e.target.value)}
-          required
-          className="border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 bg-white"
-        />
-      </div>
+      <Field
+        id="website_url"
+        label="Сайт вашей компании"
+        type="url"
+        placeholder="https://example.com"
+        value={websiteUrl}
+        onChange={setWebsiteUrl}
+        required
+      />
 
-      {/* Brand Name */}
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="brand_name" className="text-sm font-medium text-gray-900">
-          Название бренда
-        </label>
-        <input
-          id="brand_name"
-          type="text"
-          placeholder="Например: Сбербанк, Яндекс, Notion"
-          value={brandName}
-          onChange={e => setBrandName(e.target.value)}
-          required
-          className="border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 bg-white"
-        />
-      </div>
+      <Field
+        id="brand_name"
+        label="Название бренда"
+        type="text"
+        placeholder="Например: Сбербанк, Яндекс, Notion"
+        value={brandName}
+        onChange={setBrandName}
+        required
+      />
 
-      {/* Niche */}
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="niche" className="text-sm font-medium text-gray-900">
-          Ниша / тематика бизнеса
-        </label>
-        <input
-          id="niche"
-          type="text"
-          placeholder="Например: онлайн-банкинг, доставка еды, SaaS для HR"
-          value={niche}
-          onChange={e => setNiche(e.target.value)}
-          required
-          className="border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 bg-white"
-        />
-      </div>
+      <Field
+        id="niche"
+        label="Ниша / тематика бизнеса"
+        type="text"
+        placeholder="Например: онлайн-банкинг, доставка еды, SaaS для HR"
+        value={niche}
+        onChange={setNiche}
+        required
+      />
 
-      {/* Email */}
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="email" className="text-sm font-medium text-gray-900">
-          Email для получения отчёта
-        </label>
-        <input
-          id="email"
-          type="email"
-          placeholder="you@company.com"
-          value={email}
-          onChange={e => setEmail(e.target.value)}
-          required
-          className="border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 bg-white"
-        />
-        <p className="text-xs text-gray-500">
-          Отчёт будет готов через 3–7 минут. Спам не рассылаем.
-        </p>
-      </div>
+      <Field
+        id="email"
+        label="Email для получения отчёта"
+        type="email"
+        placeholder="you@company.com"
+        value={email}
+        onChange={setEmail}
+        required
+        helper="Отчёт будет готов через 3–7 минут. Спам не рассылаем."
+      />
 
-
-      {/* Error */}
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700">
+        <div className="border border-accent-700/60 bg-accent-900/30 rounded-xl px-4 py-3 text-sm text-accent-200">
           {error}
-       </div>
+        </div>
       )}
 
-      {/* Submit */}
-      <button
-        type="submit"
-        disabled={loading}
-        className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-bold text-base py-3.5 rounded-xl transition-colors flex items-center justify-center gap-2"
-      >
+      <button type="submit" disabled={loading} className="btn-primary mt-2 w-full">
         {loading ? (
-          <>
-            <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-            Отправляем...
-          </>
+          <span className="inline-flex items-center justify-center gap-2">
+            <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            Отправляем…
+          </span>
         ) : (
-          '🔍 Проверить бесплатно'
+          'Проверить бесплатно'
         )}
       </button>
 
-      <p className="text-center text-xs text-gray-400">
+      <p className="text-center text-xs text-brand-muted">
         Нажимая кнопку, вы соглашаетесь с обработкой персональных данных
       </p>
     </form>
+  );
+}
+
+/** Поле формы в стиле дизайн-системы. */
+function Field(props: {
+  id: string;
+  label: string;
+  type: string;
+  placeholder: string;
+  value: string;
+  onChange: (v: string) => void;
+  required?: boolean;
+  helper?: string;
+}) {
+  const { id, label, type, placeholder, value, onChange, required, helper } = props;
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label htmlFor={id} className="text-sm font-medium text-brand-text">
+        {label}
+      </label>
+      <input
+        id={id}
+        type={type}
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        required={required}
+        className="input-field"
+      />
+      {helper && <p className="text-xs text-brand-muted">{helper}</p>}
+    </div>
   );
 }

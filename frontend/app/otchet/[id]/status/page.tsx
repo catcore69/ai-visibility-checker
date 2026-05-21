@@ -4,17 +4,18 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { getReportStatus, type ReportStatus } from '@/lib/api';
 import ProgressTracker from '@/components/ProgressTracker';
+import { Logo } from '@/components/Logo';
 
-const POLL_INTERVAL  = 5_000;  // 5 seconds
-const MAX_WAIT_MS    = 15 * 60 * 1000; // 15 minutes max polling
+const POLL_INTERVAL = 5_000;
+const MAX_WAIT_MS = 15 * 60 * 1000;
 
 export default function StatusPage() {
   const params = useParams();
   const router = useRouter();
   const reportId = params.id as string;
 
-  const [status,    setStatus]    = useState<ReportStatus | null>(null);
-  const [error,     setError]     = useState('');
+  const [status, setStatus] = useState<ReportStatus | null>(null);
+  const [error, setError] = useState('');
   const [startedAt] = useState(Date.now());
 
   const poll = useCallback(async () => {
@@ -22,9 +23,6 @@ export default function StatusPage() {
       const data = await getReportStatus(reportId);
       setStatus(data);
 
-      // PDF уже физически готов начиная со статуса `awaiting_personal_note`.
-      // Бэк отдаёт `/report/{id}` в этом статусе, поэтому отправляем клиента
-      // смотреть отчёт сразу. Финальное письмо с заметкой эксперта догонит позже.
       const READY_STATUSES = ['awaiting_personal_note', 'sending_email', 'completed'];
       if (READY_STATUSES.includes(data.status) || (data as any).completed === true) {
         router.replace(`/otchet/${reportId}`);
@@ -32,17 +30,21 @@ export default function StatusPage() {
       }
 
       if (data.status === 'failed' || data.status === 'error' || (data as any).failed === true) {
-        setError((data as any).error || 'Произошла ошибка при формировании отчёта. Попробуйте снова.');
+        setError(
+          (data as any).error ||
+            'Произошла ошибка при формировании отчёта. Попробуйте снова.',
+        );
         return;
       }
 
-      // Check max wait time
       if (Date.now() - startedAt > MAX_WAIT_MS) {
-        setError('Анализ занимает дольше обычного. Проверьте почту — мы пришлём отчёт, как только он будет готов.');
+        setError(
+          'Анализ занимает дольше обычного. Проверьте почту — мы пришлём отчёт, как только он будет готов.',
+        );
         return;
       }
     } catch {
-      // Network errors are transient — keep polling
+      // транзиентные ошибки сети — продолжаем поллинг
     }
   }, [reportId, router, startedAt]);
 
@@ -54,56 +56,64 @@ export default function StatusPage() {
 
   if (error) {
     return (
-      <main className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
-        <div className="max-w-md w-full text-center">
-          <div className="text-5xl mb-6">😔</div>
-          <h1 className="text-2xl font-black text-gray-900 mb-4">Что-то пошло не так</h1>
-          <p className="text-gray-600 mb-8">{error}</p>
-          <a
-            href="/proverka"
-            className="inline-flex items-center gap-2 bg-blue-600 text-white font-bold px-6 py-3 rounded-xl hover:bg-blue-700 transition-colors"
-          >
-            ← Попробовать снова
-          </a>
-        </div>
+      <main className="min-h-screen bg-brand-bg flex flex-col">
+        <header className="border-b border-brand-border/60">
+          <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+            <Logo height={26} />
+          </div>
+        </header>
+        <section className="flex-1 flex items-center justify-center px-6 py-16">
+          <div className="max-w-md w-full text-center">
+            <div className="text-accent-400 font-heading text-5xl mb-6">!</div>
+            <h1 className="font-heading text-3xl mb-4">Что-то пошло не так</h1>
+            <p className="text-brand-muted mb-8">{error}</p>
+            <a href="/proverka" className="btn-primary inline-flex">
+              Попробовать снова
+            </a>
+          </div>
+        </section>
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-blue-50 to-white flex flex-col items-center justify-center px-4">
-      <div className="max-w-xl w-full">
-        {/* Header */}
-        <div className="text-center mb-10">
-          <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-5 text-2xl">
-            🔍
+    <main className="min-h-screen bg-brand-bg flex flex-col">
+      <header className="border-b border-brand-border/60">
+        <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+          <Logo height={26} />
+          <span className="eyebrow hidden sm:inline">CatCore GEO Studio</span>
+        </div>
+      </header>
+
+      <section className="flex-1 flex flex-col items-center justify-center px-6 py-16">
+        <div className="max-w-xl w-full">
+          <div className="text-center mb-10">
+            <div className="inline-flex items-center gap-2 border border-brand-border bg-brand-surface px-3 py-1.5 rounded-full mb-6">
+              <span className="w-1.5 h-1.5 rounded-full bg-accent-500 pulse-dot" />
+              <span className="eyebrow !text-brand-text">Анализ в процессе</span>
+            </div>
+            <h1 className="font-heading text-3xl sm:text-4xl mb-3">Анализируем ваш бренд</h1>
+            <p className="text-brand-muted">
+              Опрашиваем ИИ-ассистенты и анализируем упоминания. Это займёт 3–7 минут.
+            </p>
           </div>
-          <h1 className="text-3xl font-black text-gray-900 mb-3">
-            Анализируем ваш бренд
-          </h1>
-          <p className="text-gray-600">
-            Опрашиваем 7 ИИ-ассистентов и анализируем упоминания.
-            Это займёт 3–7 минут.
+
+          {status ? (
+            <ProgressTracker status={status} />
+          ) : (
+            <div className="flex justify-center">
+              <div className="w-10 h-10 border-2 border-brand-border border-t-accent-400 rounded-full animate-spin" />
+            </div>
+          )}
+
+          <p className="text-center text-xs text-brand-muted mt-10">
+            Результат также будет отправлен на вашу почту ·{' '}
+            <a href="/proverka" className="text-accent-400 hover:underline">
+              Начать новую проверку
+            </a>
           </p>
         </div>
-
-        {/* Progress */}
-        {status ? (
-          <ProgressTracker status={status} />
-        ) : (
-          <div className="flex justify-center">
-            <div className="w-10 h-10 border-3 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
-          </div>
-        )}
-
-        {/* Footer */}
-        <p className="text-center text-xs text-gray-400 mt-10">
-          Результат также будет отправлен на вашу почту ·{' '}
-          <a href="/proverka" className="text-blue-600 hover:underline">
-            Начать новую проверку
-          </a>
-        </p>
-      </div>
+      </section>
     </main>
   );
 }
