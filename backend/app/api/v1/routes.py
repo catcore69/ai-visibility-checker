@@ -4,7 +4,8 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
+from urllib.parse import quote
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import get_db, get_redis, verify_internal_token
@@ -238,27 +239,104 @@ async def get_full_report(
     return ReportFull(**payload)
 
 
+def _pdf_proxy_url(report_id: UUID) -> str:
+    """URL для скачивания PDF через наш домен — без прямого выхода клиента на S3.
+
+    Зачем: некоторые антивирусы (Avast, Касперский) флагят `s3.twcstorage.ru`
+    как фишинг, а часть провайдеров режет этот хост. Поэтому отдаём клиенту
+    ссылку на свой домен, а бэк сам стримит файл из S3.
+    """
+    base = settings.STUDIO_FULL_URL.rstrip("/")
+    return f"{base}/api/v1/report/{report_id}/pdf/file"
+
+
 @router.get("/report/{report_id}/pdf")
 async def download_pdf(
     report_id: UUID,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Pre-signed URL на PDF в S3 (1 час).
+    """JSON-ответ с URL для скачивания PDF.
 
-    Фронт (`frontend/lib/api.ts → getReportPdfUrl`) читает `data.url`,
-    поэтому возвращаем именно `url` (дублируем как `download_url` для совместимости).
+    Фронт (`frontend/lib/api.ts → getReportPdfUrl`) читает `data.url`.
+    Раньше тут возвращался pre-signed S3-URL — теперь отдаём ссылку
+    на наш домен (`/api/v1/report/{id}/pdf/file`), которая стримит файл.
+    """
+    report = await get_report(db, report_id)
+    if not report or not report.pdf_s3_key:
+        raise HTTPException(404, "PDF не готов.")
+
+    url = _pdf_proxy_url(report_id)
+    await log_event(db, report_id, "pdf_download_link_requested")
+
+    # `expires_in` оставлен для обратной совместимости фронта;
+    # фактически ссылка не истекает — это наш собственный endpoint.
+    return {"url": url, "download_url": url, "expires_in": 3600}
+
+
+@router.get("/report/{report_id}/pdf/file")
+async def stream_pdf(
+    report_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Стримит PDF клиенту через наш домен.
+
+    Backend сам берёт файл из S3 и отдаёт его браузеру с `Content-Disposition:
+    attachment`. Клиент видит в адресной строке `catcore.ru`, а не S3-домен —
+    антивирусы и провайдеры не блокируют.
     """
     report = await get_report(db, report_id)
     if not report or not report.pdf_s3_key:
         raise HTTPException(404, "PDF не готов.")
 
     from app.storage.s3_client import S3Client
+    import asyncio
     s3 = S3Client()
-    url = await s3.generate_presigned_url(report.pdf_s3_key, expires_in=3600)
+
+    try:
+        obj = await asyncio.to_thread(
+            s3._client.get_object,
+            Bucket=s3.bucket,
+            Key=report.pdf_s3_key,
+        )
+    except Exception as exc:
+        logger.error("pdf_stream_s3_error", report_id=str(report_id), error=str(exc))
+        raise HTTPException(502, "Не удалось получить файл из хранилища.")
+
+    body = obj["Body"]  # botocore StreamingBody — sync iterator
+
+    def iter_chunks(chunk_size: int = 64 * 1024):
+        try:
+            while True:
+                chunk = body.read(chunk_size)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            try:
+                body.close()
+            except Exception:
+                pass
+
+    safe_brand = "".join(c for c in (report.brand_name or "report") if c.isalnum() or c in "-_") or "report"
+    filename = f"{safe_brand}-AI-Visibility.pdf"
+    filename_utf8 = quote(filename)
+
+    headers = {
+        # ASCII fallback + UTF-8 для современных браузеров
+        "Content-Disposition": f'attachment; filename="report.pdf"; filename*=UTF-8\'\'{filename_utf8}',
+        "Cache-Control": "private, max-age=0, no-store",
+        "X-Content-Type-Options": "nosniff",
+    }
+    if obj.get("ContentLength"):
+        headers["Content-Length"] = str(obj["ContentLength"])
 
     await log_event(db, report_id, "pdf_downloaded")
 
-    return {"url": url, "download_url": url, "expires_in": 3600}
+    return StreamingResponse(
+        iter_chunks(),
+        media_type="application/pdf",
+        headers=headers,
+    )
 
 
 @router.post("/report/{report_id}/cta")
