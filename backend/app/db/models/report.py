@@ -41,6 +41,22 @@ class Report(Base):
     # Browser fingerprint
     browser_fingerprint = Column(String(200), nullable=True)
 
+    # Этап 1 ТЗ: конкуренты, указанные клиентом в форме (опционально).
+    # Если задано >=3 — pipeline берёт их вместо LLM-подбора.
+    client_competitors = Column(JSONB, nullable=True)
+    # Откуда взяты итоговые конкуренты: "client" / "mixed" / "llm".
+    # Видно в PDF на странице методологии — снимает уязвимость
+    # "вы выдумали моих конкурентов".
+    competitors_source = Column(String(20), nullable=True)
+
+    # Этап 1 ТЗ: фиксация согласий на ОПД (Закон РБ № 99-З).
+    # Два РАЗДЕЛЬНЫХ согласия — общее и на трансграничную передачу.
+    # Не nullable=False, чтобы старые отчёты не сломались, но в новых
+    # обязательно проставляются на этапе POST /check.
+    consent_personal_data_at = Column(DateTime, nullable=True)
+    consent_cross_border_at = Column(DateTime, nullable=True)
+    consent_ip = Column(String(45), nullable=True)  # IPv6-safe (45 символов)
+
     # Результаты pipeline (JSONB)
     niche_data = Column(JSONB, nullable=True)
     competitors = Column(JSONB, nullable=True)

@@ -13,6 +13,18 @@ class CheckRequest(BaseModel):
     # Подсказка ниши от клиента из формы — приоритет над авто-детектом.
     # Принимаем под двумя именами (никакой alias-магии — оба явных поля).
     niche_hint: Optional[str] = Field(default=None, alias="niche")
+
+    # Этап 1.1 ТЗ: клиент может сам указать своих конкурентов
+    # (до 5 имён). Если задано >=3 — pipeline возьмёт их вместо LLM-подбора,
+    # это сильно повышает релевантность для региональных/нишевых бизнесов.
+    client_competitors: Optional[list[str]] = Field(default=None, max_length=5)
+
+    # Этап 1.4 ТЗ: ДВА раздельных чекбокса согласия по Закону РБ № 99-З.
+    # Оба обязательны — без них форма не должна отправляться.
+    # Pydantic-валидатор ниже жёстко требует True.
+    consent_personal_data: bool = False
+    consent_cross_border: bool = False
+
     browser_fingerprint: Optional[str] = None
     turnstile_token: str = ""
     website_url_honeypot: str = ""  # Honeypot-поле
@@ -24,10 +36,47 @@ class CheckRequest(BaseModel):
 
     @field_validator("url")
     @classmethod
-    def validate_url(cls, v: str) -> str:
+    def _normalize_url(cls, v: str) -> str:
+        """Только нормализация — реальная валидация (HEAD, blacklist)
+        делается в routes.py через url_validator."""
         v = v.strip()
         if not v.startswith(("http://", "https://")):
             v = "https://" + v
+        return v
+
+    @field_validator("client_competitors")
+    @classmethod
+    def _clean_competitors(cls, v: Optional[list[str]]) -> Optional[list[str]]:
+        if not v:
+            return None
+        cleaned: list[str] = []
+        for item in v:
+            if not isinstance(item, str):
+                continue
+            name = item.strip()
+            if not name:
+                continue
+            if len(name) > 100:
+                name = name[:100]
+            cleaned.append(name)
+        return cleaned[:5] or None
+
+    @field_validator("consent_personal_data")
+    @classmethod
+    def _require_consent_personal_data(cls, v: bool) -> bool:
+        if not v:
+            raise ValueError(
+                "Требуется согласие на обработку персональных данных."
+            )
+        return v
+
+    @field_validator("consent_cross_border")
+    @classmethod
+    def _require_consent_cross_border(cls, v: bool) -> bool:
+        if not v:
+            raise ValueError(
+                "Требуется согласие на трансграничную передачу данных."
+            )
         return v
 
 

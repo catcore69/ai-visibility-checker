@@ -34,6 +34,7 @@ from app.db.repositories.report_repo import (
 from app.utils.logger import get_logger
 from app.utils.rate_limiter import check_can_create_report, get_queue_position
 from app.utils.url_normalizer import canonical_keys, extract_brand_from_url, mask_email, normalize_url
+from app.utils.url_validator import validate_url as validate_client_url
 
 logger = get_logger(__name__)
 
@@ -50,7 +51,16 @@ async def start_check(
     """Принимает заявку, отправляет email верификации. Pipeline стартует только после клика."""
 
     ip = request.headers.get("X-Real-IP") or request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or (request.client.host if request.client else "0.0.0.0")
-    brand_name = body.brand_name or extract_brand_from_url(body.url)
+
+    # Этап 1.2 ТЗ: валидация URL — формат, чёрный список агрегаторов, HEAD-проверка.
+    # На клиенте тоже валидируем (input[type=url] + JS), но бэк — последняя линия защиты.
+    is_valid_url, normalized_url, url_error = await validate_client_url(body.url)
+    if not is_valid_url:
+        raise HTTPException(400, url_error or "Адрес сайта не прошёл проверку.")
+    # Используем нормализованный URL (с https://, без хвостов) во всём pipeline
+    body_url = normalized_url
+
+    brand_name = body.brand_name or extract_brand_from_url(body_url)
 
     # Многослойная проверка защиты от абуза
   #  can_create, reason = await check_can_create_report(
@@ -72,23 +82,27 @@ async def start_check(
 
     verification_token = secrets.token_urlsafe(32)
     expires_at = datetime.utcnow() + timedelta(hours=24)
-    domain_key, domain_brand_key = canonical_keys(body.url, brand_name)
+    domain_key, domain_brand_key = canonical_keys(body_url, brand_name)
 
     # Подсказка ниши от клиента — сохраняем в niche_data как user_hint,
     # чтобы pipeline (detect_niche) мог её учесть.
     niche_hint = (body.niche_hint or "").strip() or None
     niche_data_initial = {"user_hint": niche_hint} if niche_hint else None
 
+    # Этап 1.4 ТЗ: фиксируем оба согласия с timestamp и IP клиента —
+    # это юридическое доказательство для НЦЗПД РБ.
+    now = datetime.utcnow()
+
     report = Report(
-        url=body.url,
-        url_normalized=normalize_url(body.url),
+        url=body_url,
+        url_normalized=normalize_url(body_url),
         canonical_key=domain_brand_key,
         brand_name=brand_name,
         region=body.region,
         email=str(body.email),
         status="pending_verification",
         email_verification_token=verification_token,
-        email_verification_sent_at=datetime.utcnow(),
+        email_verification_sent_at=now,
         email_verification_expires_at=expires_at,
         browser_fingerprint=body.browser_fingerprint,
         ip_address=ip,
@@ -98,6 +112,12 @@ async def start_check(
         utm_medium=body.utm_medium,
         utm_campaign=body.utm_campaign,
         niche_data=niche_data_initial,
+        # Этап 1.1 — клиентские конкуренты
+        client_competitors=body.client_competitors,
+        # Этап 1.4 — согласия (Закон РБ № 99-З)
+        consent_personal_data_at=now,
+        consent_cross_border_at=now,
+        consent_ip=ip,
     )
     await create_report(db, report)
 

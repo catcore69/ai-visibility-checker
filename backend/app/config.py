@@ -39,7 +39,8 @@ class Settings(BaseSettings):
 
     # === Pipeline ===
     ENABLED_MODELS: str = "chatgpt,yandexgpt,alisa,gigachat,gemini,deepseek,perplexity"
-    PROMPTS_PER_REPORT: int = 15
+    # Этап 1.3 ТЗ: снижено с 15 до 10 (4 рек / 3 срав / 2 проб / 1 транз)
+    PROMPTS_PER_REPORT: int = 10
     COMPETITORS_PER_REPORT: int = 5
     CACHE_TTL_DAYS: int = 7
     DAILY_REPORT_LIMIT: int = 20

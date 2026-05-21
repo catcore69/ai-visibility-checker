@@ -15,7 +15,7 @@ if config.config_file_name is not None:
 
 # Импортируем все модели для автогенерации миграций
 from app.db.base import Base
-from app.db.models import report, lead_event, cached_response  # noqa
+from app.db.models import report, lead_event, cached_response, niche_prompt_template  # noqa
 
 target_metadata = Base.metadata
 

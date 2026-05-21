@@ -15,6 +15,11 @@ export interface CheckPayload {
   brand_name: string;
   niche: string;
   email: string;
+  /** Этап 1.1 ТЗ — конкуренты, указанные клиентом (опционально, до 5). */
+  client_competitors?: string[];
+  /** Этап 1.4 ТЗ — оба обязательны на форме, бэк проверяет повторно. */
+  consent_personal_data: boolean;
+  consent_cross_border: boolean;
   turnstile_token: string;
   fingerprint_id: string;
   /** Honeypot – must be empty */

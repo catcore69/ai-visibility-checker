@@ -130,11 +130,24 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
         await update_report_field(db, report_id, niche_data=niche)
         await update_report_status(db, report_id, "competitor_discovery", progress=15)
 
-        # ШАГ 3: Конкуренты
-        competitors = await find_competitors(
-            niche, brand_name=report.brand_name, count=settings.COMPETITORS_PER_REPORT
+        # ШАГ 3: Конкуренты (Этап 1.1 ТЗ — учитываем указанных клиентом).
+        client_competitors = (
+            list(report.client_competitors)
+            if isinstance(report.client_competitors, list)
+            else None
         )
-        await update_report_field(db, report_id, competitors=competitors)
+        competitors, competitors_source = await find_competitors(
+            niche,
+            brand_name=report.brand_name,
+            count=settings.COMPETITORS_PER_REPORT,
+            client_competitors=client_competitors,
+        )
+        await update_report_field(
+            db,
+            report_id,
+            competitors=competitors,
+            competitors_source=competitors_source,
+        )
         await update_report_status(db, report_id, "prompt_generation", progress=25)
 
         # ШАГ 4: Промпты
