@@ -6,112 +6,77 @@ interface Props {
   data: ModelBreakdown[];
 }
 
-const MODEL_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
-  chatgpt:    { bg: 'bg-gray-50',     text: 'text-gray-800',  dot: 'bg-gray-700'  },
-  yandex:     { bg: 'bg-yellow-50',   text: 'text-yellow-900',dot: 'bg-yellow-500'},
-  gigachat:   { bg: 'bg-green-50',    text: 'text-green-900', dot: 'bg-green-500' },
-  gemini:     { bg: 'bg-blue-50',     text: 'text-blue-900',  dot: 'bg-blue-500'  },
-  deepseek:   { bg: 'bg-purple-50',   text: 'text-purple-900',dot: 'bg-purple-500'},
-  alisa:      { bg: 'bg-pink-50',     text: 'text-pink-900',  dot: 'bg-pink-500'  },
-  perplexity: { bg: 'bg-violet-50',   text: 'text-violet-900',dot: 'bg-violet-500'},
+const SENTIMENT_LABELS: Record<string, { label: string; cls: string }> = {
+  positive: { label: 'позитив',     cls: 'bg-success/15 text-success border border-success/30' },
+  neutral:  { label: 'нейтрально',  cls: 'bg-brand-surface text-brand-muted border border-brand-border' },
+  negative: { label: 'негатив',     cls: 'bg-danger/15 text-danger border border-danger/30' },
 };
 
-function getCssClass(modelName: string): string {
-  const lower = modelName.toLowerCase();
-  if (lower.includes('chatgpt') || lower.includes('openai') || lower.includes('gpt')) return 'chatgpt';
-  if (lower.includes('yandex') || lower.includes('yagpt')) return 'yandex';
-  if (lower.includes('gigachat') || lower.includes('giga')) return 'gigachat';
-  if (lower.includes('gemini')) return 'gemini';
-  if (lower.includes('deepseek')) return 'deepseek';
-  if (lower.includes('alisa') || lower.includes('alice') || lower.includes('yandex_neuro')) return 'alisa';
-  if (lower.includes('perplexity')) return 'perplexity';
-  return 'chatgpt';
+function statusColor(rate: number) {
+  if (rate >= 60) return 'text-success';
+  if (rate >= 30) return 'text-warning';
+  if (rate > 0)   return 'text-danger';
+  return 'text-brand-muted';
 }
 
-const SENTIMENT_LABELS: Record<string, { label: string; cls: string }> = {
-  positive: { label: 'позитив', cls: 'bg-green-100 text-green-700' },
-  neutral:  { label: 'нейтрально', cls: 'bg-gray-100 text-gray-600' },
-  negative: { label: 'негатив', cls: 'bg-red-100 text-red-700' },
-};
+function barColor(rate: number) {
+  if (rate >= 60) return 'bg-success';
+  if (rate >= 30) return 'bg-warning';
+  if (rate > 0)   return 'bg-danger';
+  return 'bg-brand-elevated';
+}
 
 export default function ModelBreakdownGrid({ data }: Props) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-      {data.map(model => {
-        const cssKey = getCssClass(model.model_name);
-        const colors = MODEL_COLORS[cssKey] || MODEL_COLORS.chatgpt;
-        const hasData = model.mentions > 0;
+      {data.map((model) => {
         const rate = model.presence_rate;
-
         return (
-          <div
-            key={model.model_name}
-            className={`rounded-2xl border-2 p-5 flex flex-col gap-3 ${
-              hasData ? `${colors.bg} border-current` : 'bg-gray-50 border-gray-100'
-            }`}
-          >
-            {/* Header */}
+          <div key={model.model_name} className="card-surface p-5 flex flex-col gap-3">
             <div className="flex items-center gap-2">
-              <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${hasData ? colors.dot : 'bg-gray-300'}`} />
-              <span className={`font-bold text-sm ${hasData ? colors.text : 'text-gray-500'}`}>
-                {model.display_name}
-              </span>
+              <span className={`w-2 h-2 rounded-full ${rate > 0 ? 'bg-accent-500' : 'bg-brand-elevated'}`} />
+              <span className="font-heading text-sm text-brand-textBright">{model.display_name}</span>
             </div>
 
-            {/* Presence Rate */}
             <div>
               <div className="flex justify-between items-end mb-1">
-                <span className="text-xs text-gray-500">Presence Rate</span>
-                <span className={`text-2xl font-black leading-none ${
-                  rate >= 60 ? 'text-green-500' : rate >= 30 ? 'text-orange-500' : rate > 0 ? 'text-red-500' : 'text-gray-400'
-                }`}>
-                  {rate}%
-                </span>
+                <span className="text-xs text-brand-muted">Presence Rate</span>
+                <span className={`text-2xl font-heading leading-none ${statusColor(rate)}`}>{rate}%</span>
               </div>
-              <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+              <div className="w-full h-1.5 bg-brand-elevated rounded-full overflow-hidden">
                 <div
-                  className={`h-full rounded-full transition-all duration-700 ${
-                    rate >= 60 ? 'bg-green-500' : rate >= 30 ? 'bg-orange-500' : rate > 0 ? 'bg-red-500' : 'bg-gray-300'
-                  }`}
+                  className={`h-full rounded-full transition-all duration-700 ${barColor(rate)}`}
                   style={{ width: `${rate}%` }}
                 />
               </div>
-              <p className="text-xs text-gray-400 mt-1">
+              <p className="text-xs text-brand-muted mt-1">
                 {model.mentions} из {model.prompts_tested} запросов
               </p>
             </div>
 
-            {/* Avg position */}
             {model.avg_position != null && (
-              <div className="text-xs text-gray-500">
-                Средняя позиция: <strong>#{model.avg_position}</strong>
+              <div className="text-xs text-brand-muted">
+                Средняя позиция: <strong className="text-brand-text">#{model.avg_position}</strong>
               </div>
             )}
 
-            {/* Sentiment */}
-            {model.dominant_sentiment && (
-              <div>
-                {(() => {
-                  const s = SENTIMENT_LABELS[model.dominant_sentiment];
-                  return s ? (
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${s.cls}`}>
-                      {s.label}
-                    </span>
-                  ) : null;
-                })()}
-              </div>
+            {model.dominant_sentiment && SENTIMENT_LABELS[model.dominant_sentiment] && (
+              <span
+                className={`text-xs px-2 py-0.5 rounded-full font-medium self-start ${SENTIMENT_LABELS[model.dominant_sentiment].cls}`}
+              >
+                {SENTIMENT_LABELS[model.dominant_sentiment].label}
+              </span>
             )}
 
-            {/* Status badge */}
             <div className="mt-auto">
               {rate >= 60 ? (
-                <span className="text-xs font-medium text-green-600">✅ Сильная позиция</span>
+                <span className="text-xs font-medium text-success">Сильная позиция</span>
               ) : rate >= 30 ? (
-                <span className="text-xs font-medium text-orange-500">⚡ Требует внимания</span>
+                <span className="text-xs font-medium text-warning">Требует внимания</span>
               ) : rate > 0 ? (
-                <span className="text-xs font-medium text-red-500">⚠️ Слабая позиция</span>
+                <span className="text-xs font-medium text-danger">Слабая позиция</span>
               ) : (
-                <span className="text-xs font-medium text-gray-400">❌ Не упоминается</span>
+                <span className="text-xs font-medium text-brand-muted">Не упоминается</span>
               )}
             </div>
           </div>

@@ -2,9 +2,9 @@
 <div class="section page-break">
   <div class="section-title">Конкурентный анализ</div>
 
-  <p style="font-size:9pt; color:#3A3A3C; margin-bottom:5mm;">
+  <p style="font-size:9pt; color:#15171A; margin-bottom:5mm;">
     Сравнение с конкурентами по всем {{ prompts_count }} запросам и {{ models_total }} ИИ-моделям.
-    Ваш бренд выделен синим.
+    Ваш бренд выделен акцентным красным.
   </p>
 
   <!-- Competitor bar chart -->
@@ -30,9 +30,9 @@
       <td>
         {% if brand.is_client %}⭐ {% endif %}
         {{ brand.name }}
-        {% if brand.is_client %}<br><span style="font-size:7.5pt; color:#0066FF; font-weight:400;">(ваш бренд)</span>{% endif %}
+        {% if brand.is_client %}<br><span style="font-size:7.5pt; color:#A63D3D; font-weight:400;">(ваш бренд)</span>{% endif %}
       </td>
-      <td style="text-align:center; font-weight:700; color:{% if brand.is_client %}#0066FF{% else %}#1C1C1E{% endif %};">
+      <td style="text-align:center; font-weight:700; color:{% if brand.is_client %}#A63D3D{% else %}#15171A{% endif %};">
         {{ brand.score }}
       </td>
       <td style="text-align:center;">{{ brand.presence_rate }}%</td>
@@ -57,7 +57,7 @@
     <p style="font-size:10pt; font-weight:700; margin-bottom:3mm;">
       ⚠️ Запросы, где конкуренты обходят вас
     </p>
-    <p style="font-size:8.5pt; color:#8E8E93; margin-bottom:4mm;">
+    <p style="font-size:8.5pt; color:#6E7480; margin-bottom:4mm;">
       Топ-{{ worst_prompts|length }} запросов, в которых ваши конкуренты получают упоминания, а вы — нет.
       Это ваши приоритетные точки роста.
     </p>
@@ -73,10 +73,10 @@
         <td style="font-size:8pt;">{{ wp.prompt }}</td>
         <td>
           {% for c in wp.competitors_mentioned %}
-            <span style="color:#FF3B30; font-weight:600;">{{ c }}</span>{% if not loop.last %}, {% endif %}
+            <span style="color:#B93A3A; font-weight:600;">{{ c }}</span>{% if not loop.last %}, {% endif %}
           {% endfor %}
         </td>
-        <td style="color:#8E8E93;">
+        <td style="color:#6E7480;">
           {% if wp.client_position %}
             #{{ wp.client_position }}
           {% else %}
@@ -85,11 +85,11 @@
         </td>
         <td>
           {% if wp.gap_score >= 70 %}
-            <span style="color:#34C759; font-weight:700;">Высокий</span>
+            <span style="color:#3BA776; font-weight:700;">Высокий</span>
           {% elif wp.gap_score >= 40 %}
-            <span style="color:#FF9500; font-weight:700;">Средний</span>
+            <span style="color:#D29A3C; font-weight:700;">Средний</span>
           {% else %}
-            <span style="color:#8E8E93;">Низкий</span>
+            <span style="color:#6E7480;">Низкий</span>
           {% endif %}
         </td>
       </tr>
@@ -100,11 +100,11 @@
 
   <!-- Что делают лидеры по-другому -->
   {% if sov_leader %}
-  <div style="margin-top:7mm; background:#F2F2F7; border-radius:8px; padding:5mm; page-break-inside:avoid;">
+  <div style="margin-top:7mm; background:#ECE7DA; border-radius:8px; padding:5mm; page-break-inside:avoid;">
     <p style="font-weight:700; font-size:9.5pt; margin:0 0 2mm;">
       🏆 Что отличает лидера ниши — {{ sov_leader.name }} (SoV {{ sov_leader.sov }}%)?
     </p>
-    <p style="font-size:8.5pt; color:#3A3A3C; margin:0;">
+    <p style="font-size:8.5pt; color:#15171A; margin:0;">
       {{ sov_leader.insight | default("Бренд активно публикует экспертный контент на авторитетных площадках, которые используются ИИ-моделями как источники. Это приводит к стабильным упоминаниям в ответах.") }}
     </p>
   </div>

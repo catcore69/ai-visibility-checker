@@ -8,13 +8,13 @@
     <img class="score-img" src="data:image/png;base64,{{ score_chart_b64 }}" alt="Score gauge">
     {% else %}
     <div class="score-img" style="display:flex;align-items:center;justify-content:center;
-         background:#F2F2F7;border-radius:8px;height:50mm;">
-      <span style="font-size:28pt;font-weight:900;color:#0066FF;">{{ visibility_score }}</span>
+         background:#FFFFFF;border:1px solid #D9D5CC;border-radius:10px;height:50mm;">
+      <span style="font-family:'TT Hoves Pro',sans-serif;font-size:32pt;color:#A63D3D;">{{ visibility_score }}</span>
     </div>
     {% endif %}
 
     <div class="score-components">
-      <p style="font-size:9pt;color:#8E8E93;margin:0 0 4mm;">
+      <p style="font-size:9pt;color:#6E7480;margin:0 0 4mm;">
         Итоговый балл складывается из четырёх компонентов:
       </p>
 
@@ -55,8 +55,10 @@
       </div>
 
       <!-- Итог -->
-      <div style="margin-top:5mm; background:#0066FF; color:#fff; border-radius:6px; padding:3mm 4mm; text-align:center;">
-        <span style="font-size:12pt; font-weight:900;">Итоговый AI Visibility Score: {{ visibility_score }} / 100</span>
+      <div style="margin-top:5mm; background:#15171A; color:#F4F1EA; border-radius:8px; padding:3.5mm 5mm; text-align:center;">
+        <span style="font-family:'TT Hoves Pro',sans-serif;font-size:12pt;letter-spacing:0.03em;">
+          Итоговый AI Visibility Score: <span style="color:#A63D3D;">{{ visibility_score }}</span> / 100
+        </span>
       </div>
     </div>
   </div>
@@ -68,27 +70,27 @@
       <th>Оценка</th>
       <th>Что это значит</th>
     </tr>
-    <tr {% if visibility_score < 20 %}style="background:#FFF3CD;"{% endif %}>
+    <tr {% if visibility_score < 20 %}style="background:#FBEDED;"{% endif %}>
       <td>0–19</td>
       <td>Критически низкий</td>
       <td>ИИ-ассистенты не знают о вашем бренде. Срочно нужна GEO-стратегия.</td>
     </tr>
-    <tr {% if visibility_score >= 20 and visibility_score < 40 %}style="background:#FFF3CD;"{% endif %}>
+    <tr {% if visibility_score >= 20 and visibility_score < 40 %}style="background:#FBEDED;"{% endif %}>
       <td>20–39</td>
       <td>Низкий</td>
       <td>Редкие упоминания, нет устойчивого позиционирования в ИИ.</td>
     </tr>
-    <tr {% if visibility_score >= 40 and visibility_score < 60 %}style="background:#E8F0FE;"{% endif %}>
+    <tr {% if visibility_score >= 40 and visibility_score < 60 %}style="background:#FBEDED;"{% endif %}>
       <td>40–59</td>
       <td>Средний</td>
       <td>Базовая видимость есть. Конкуренты могут опередить при активной работе.</td>
     </tr>
-    <tr {% if visibility_score >= 60 and visibility_score < 80 %}style="background:#D4EDDA;"{% endif %}>
+    <tr {% if visibility_score >= 60 and visibility_score < 80 %}style="background:#E6F1EB;"{% endif %}>
       <td>60–79</td>
       <td>Хороший</td>
       <td>Бренд узнаваем в ИИ. Есть потенциал для лидерства.</td>
     </tr>
-    <tr {% if visibility_score >= 80 %}style="background:#D4EDDA;"{% endif %}>
+    <tr {% if visibility_score >= 80 %}style="background:#E6F1EB;"{% endif %}>
       <td>80–100</td>
       <td>Отличный</td>
       <td>Вы — ИИ-лидер ниши. Фокус на удержании позиций.</td>
@@ -127,7 +129,7 @@
         </tr>
         {% endif %}
       </table>
-      <p style="font-size:8pt; color:#8E8E93; margin-top:3mm;">
+      <p style="font-size:8pt; color:#6E7480; margin-top:3mm;">
         Анализ тональности проводился по упоминаниям бренда «{{ brand_name }}»
         в ответах ИИ-ассистентов с помощью LLM-классификатора.
       </p>

@@ -2,7 +2,7 @@
 <div class="section page-break">
   <div class="section-title">Детали по запросам</div>
 
-  <p style="font-size:9pt; color:#3A3A3C; margin-bottom:5mm;">
+  <p style="font-size:9pt; color:#15171A; margin-bottom:5mm;">
     Результаты проверки по каждому из {{ prompts_count }} запросов к ИИ-ассистентам.
     В ячейках показана тональность упоминания: ✅ — позитивное, ➖ — нейтральное, ⚠️ — негативное,
     · — не упоминается.
@@ -25,18 +25,18 @@
       {% for cell in row.cells %}
       <td style="text-align:center; vertical-align:middle;">
         {% if cell.mentioned and cell.sentiment == 'positive' %}
-          <span style="color:#34C759; font-weight:700;" title="Упоминается позитивно">✅</span>
+          <span style="color:#3BA776; font-weight:700;" title="Упоминается позитивно">✅</span>
         {% elif cell.mentioned and cell.sentiment == 'negative' %}
-          <span style="color:#FF3B30; font-weight:700;" title="Упоминается негативно">⚠️</span>
+          <span style="color:#B93A3A; font-weight:700;" title="Упоминается негативно">⚠️</span>
         {% elif cell.mentioned %}
-          <span style="color:#FF9500;" title="Упоминается нейтрально">➖</span>
+          <span style="color:#D29A3C;" title="Упоминается нейтрально">➖</span>
         {% elif cell.error %}
-          <span style="color:#C7C7CC;" title="Ошибка запроса">!</span>
+          <span style="color:#BDB8AD;" title="Ошибка запроса">!</span>
         {% else %}
-          <span style="color:#C7C7CC;">·</span>
+          <span style="color:#BDB8AD;">·</span>
         {% endif %}
         {% if cell.position %}
-          <br><span style="font-size:6.5pt; color:#8E8E93;">#{{ cell.position }}</span>
+          <br><span style="font-size:6.5pt; color:#6E7480;">#{{ cell.position }}</span>
         {% endif %}
       </td>
       {% endfor %}
@@ -45,12 +45,12 @@
   </table>
 
   <!-- Легенда -->
-  <div style="margin-top:5mm; display:flex; gap:6mm; font-size:7.5pt; color:#8E8E93; flex-wrap:wrap;">
-    <span><span style="color:#34C759; font-weight:700;">✅</span> Позитивное упоминание</span>
-    <span><span style="color:#FF9500;">➖</span> Нейтральное упоминание</span>
-    <span><span style="color:#FF3B30; font-weight:700;">⚠️</span> Негативное упоминание</span>
-    <span><span style="color:#C7C7CC;">·</span> Не упоминается</span>
-    <span><span style="color:#C7C7CC;">!</span> Ошибка запроса</span>
+  <div style="margin-top:5mm; display:flex; gap:6mm; font-size:7.5pt; color:#6E7480; flex-wrap:wrap;">
+    <span><span style="color:#3BA776; font-weight:700;">✅</span> Позитивное упоминание</span>
+    <span><span style="color:#D29A3C;">➖</span> Нейтральное упоминание</span>
+    <span><span style="color:#B93A3A; font-weight:700;">⚠️</span> Негативное упоминание</span>
+    <span><span style="color:#BDB8AD;">·</span> Не упоминается</span>
+    <span><span style="color:#BDB8AD;">!</span> Ошибка запроса</span>
   </div>
 
   <!-- Топ-5 лучших и худших запросов -->
@@ -59,14 +59,14 @@
 
     {% if top_prompts %}
     <div>
-      <p style="font-size:9.5pt; font-weight:700; color:#34C759; margin:0 0 3mm;">
+      <p style="font-size:9.5pt; font-weight:700; color:#3BA776; margin:0 0 3mm;">
         🏆 Лучшие запросы для вас
       </p>
       {% for p in top_prompts %}
-      <div style="background:#F0FFF4; border-left:3px solid #34C759; border-radius:4px;
+      <div style="background:#E6F1EB; border-left:3px solid #3BA776; border-radius:4px;
                   padding:2mm 3mm; margin-bottom:2mm; font-size:8pt;">
         <span style="font-weight:600;">{{ loop.index }}. {{ p.prompt }}</span><br>
-        <span style="color:#8E8E93;">
+        <span style="color:#6E7480;">
           Упоминаний: {{ p.mention_count }}/{{ models_total }}
           {% if p.avg_sentiment == 'positive' %} · преобладает позитив{% endif %}
         </span>
@@ -77,14 +77,14 @@
 
     {% if bottom_prompts %}
     <div>
-      <p style="font-size:9.5pt; font-weight:700; color:#FF3B30; margin:0 0 3mm;">
+      <p style="font-size:9.5pt; font-weight:700; color:#B93A3A; margin:0 0 3mm;">
         ⚡ Приоритеты для улучшения
       </p>
       {% for p in bottom_prompts %}
-      <div style="background:#FFF5F5; border-left:3px solid #FF3B30; border-radius:4px;
+      <div style="background:#FBEDED; border-left:3px solid #B93A3A; border-radius:4px;
                   padding:2mm 3mm; margin-bottom:2mm; font-size:8pt;">
         <span style="font-weight:600;">{{ loop.index }}. {{ p.prompt }}</span><br>
-        <span style="color:#8E8E93;">
+        <span style="color:#6E7480;">
           Упоминаний: {{ p.mention_count }}/{{ models_total }}
           {% if p.competitor_count > 0 %} · конкуренты: {{ p.competitor_count }}{% endif %}
         </span>
@@ -102,7 +102,7 @@
     <p style="font-size:9.5pt; font-weight:700; margin:0 0 3mm;">
       📚 Источники, которые цитируют ИИ в вашей нише
     </p>
-    <p style="font-size:8pt; color:#8E8E93; margin-bottom:3mm;">
+    <p style="font-size:8pt; color:#6E7480; margin-bottom:3mm;">
       Эти площадки используются ИИ-ассистентами при ответах на запросы в нише «{{ niche }}».
       Наличие вашего контента на них напрямую влияет на AI Visibility.
     </p>
@@ -122,9 +122,9 @@
         </td>
         <td>
           {% if src.has_client_content %}
-            <span style="color:#34C759; font-weight:700;">✅ Есть</span>
+            <span style="color:#3BA776; font-weight:700;">✅ Есть</span>
           {% else %}
-            <span style="color:#FF3B30;">❌ Нет</span>
+            <span style="color:#B93A3A;">❌ Нет</span>
           {% endif %}
         </td>
       </tr>

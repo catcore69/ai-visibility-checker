@@ -8,10 +8,15 @@ interface Props {
   strokeWidth?: number;
 }
 
+/**
+ * Score-кольцо в фирменных цветах.
+ * Цвет результата привязан к диапазонам брендбука: красный — критично, оранжевый — средне,
+ * успех (зелёный из дизайн-системы) — хорошо.
+ */
 function getScoreColor(score: number): string {
-  if (score >= 70) return '#34C759';
-  if (score >= 45) return '#FF9500';
-  return '#FF3B30';
+  if (score >= 70) return '#3BA776'; // success
+  if (score >= 45) return '#D29A3C'; // warning
+  return '#B93A3A';                  // danger (акцентный красный)
 }
 
 function getScoreLabel(score: number): string {
@@ -38,16 +43,14 @@ export default function ScoreRing({ score, size = 160, strokeWidth = 12 }: Props
   return (
     <div className="flex flex-col items-center">
       <svg width={size} height={size} className="rotate-[-90deg]">
-        {/* Background circle */}
         <circle
           cx={size / 2}
           cy={size / 2}
           r={radius}
           fill="none"
-          stroke="#E5E5EA"
+          stroke="rgba(255,255,255,0.08)"
           strokeWidth={strokeWidth}
         />
-        {/* Progress circle */}
         <circle
           cx={size / 2}
           cy={size / 2}
@@ -61,19 +64,18 @@ export default function ScoreRing({ score, size = 160, strokeWidth = 12 }: Props
           style={{ transition: 'stroke-dashoffset 1.2s ease-out' }}
         />
       </svg>
-      {/* Center text (overlaid) */}
       <div
         className="flex flex-col items-center justify-center"
-        style={{ marginTop: -(size), height: size }}
+        style={{ marginTop: -size, height: size }}
       >
         <span
-          className="font-black leading-none"
-          style={{ fontSize: size * 0.22, color }}
+          className="font-heading leading-none"
+          style={{ fontSize: size * 0.26, color }}
         >
           {score}
         </span>
-        <span className="text-xs text-gray-500 mt-1">/ 100</span>
-        <span className="text-xs font-semibold mt-0.5" style={{ color }}>
+        <span className="text-xs text-brand-muted mt-1">/ 100</span>
+        <span className="text-xs font-medium mt-0.5" style={{ color }}>
           {getScoreLabel(score)}
         </span>
       </div>

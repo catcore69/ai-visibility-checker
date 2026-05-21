@@ -4,167 +4,275 @@
 <meta charset="UTF-8">
 <title>AI Visibility Report — {{ brand_name }}</title>
 <style>
+  /* ===== ШРИФТЫ БРЕНДБУКА (TT Hoves Pro / Graphik) ===== */
+  @font-face {
+    font-family: 'TT Hoves Pro';
+    src: url('fonts/TTHovesPro-Bold.woff2') format('woff2');
+    font-weight: 700; font-style: normal;
+  }
+  @font-face {
+    font-family: 'Graphik';
+    src: url('fonts/Graphik-Regular.woff2') format('woff2');
+    font-weight: 400; font-style: normal;
+  }
+  @font-face {
+    font-family: 'Graphik';
+    src: url('fonts/Graphik-Medium.woff2') format('woff2');
+    font-weight: 500; font-style: normal;
+  }
+  @font-face {
+    font-family: 'Graphik';
+    src: url('fonts/Graphik-Bold.woff2') format('woff2');
+    font-weight: 700; font-style: normal;
+  }
+
+  /* ===== СТРАНИЦА A4 ===== */
   @page {
     size: A4;
     margin: 20mm 18mm 22mm 18mm;
+    background: #F4F1EA;
     @bottom-center {
       content: element(footer);
     }
   }
-  @page :first { margin-top: 0; }
+  @page :first {
+    margin: 0;
+    background: #0E0F12;
+  }
 
   * { box-sizing: border-box; }
 
   body {
-    font-family: 'DejaVu Sans', Arial, sans-serif;
+    font-family: 'Graphik', 'DejaVu Sans', Arial, sans-serif;
     font-size: 10pt;
-    color: #1C1C1E;
-    line-height: 1.5;
+    color: #15171A;
+    line-height: 1.55;
+    margin: 0;
+    background: #F4F1EA;
+  }
+
+  h1, h2, h3, h4 {
+    font-family: 'TT Hoves Pro', 'DejaVu Sans', Arial, sans-serif;
+    font-weight: 700;
+    letter-spacing: -0.005em;
+    color: #15171A;
     margin: 0;
   }
 
-  /* ===== ФУТЕР КАЖДОЙ СТРАНИЦЫ ===== */
+  /* ===== ФУТЕР ===== */
   #page-footer {
     position: running(footer);
     display: flex;
     justify-content: space-between;
     align-items: center;
     font-size: 8pt;
-    color: #8E8E93;
-    border-top: 1px solid #E5E5EA;
+    color: #6E7480;
+    border-top: 1px solid #D9D5CC;
     padding-top: 6px;
   }
 
-  /* ===== ОБЛОЖКА ===== */
+  /* ===== ОБЛОЖКА (тёмная, по брендбуку — единственная тёмная страница) ===== */
   .cover {
     page-break-after: always;
-    background: linear-gradient(160deg, #0055D4 0%, #003A9B 100%);
-    min-height: 270mm;
-    padding: 40mm 20mm 20mm;
-    color: #fff;
+    background: #0E0F12;
+    min-height: 297mm;
+    padding: 30mm 20mm 22mm;
+    color: #E6E8EC;
     display: flex;
     flex-direction: column;
+  }
+  .cover-eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 9pt;
+    font-weight: 500;
+    color: #8A8F99;
+  }
+  .cover-logo-row {
+    display: flex;
     align-items: center;
-    text-align: center;
+    gap: 4mm;
+    margin-bottom: 30mm;
   }
-  .cover-logo { margin-bottom: 24mm; opacity: 0.9; }
-  .cover-score-ring {
-    width: 52mm; height: 52mm;
-    border-radius: 50%;
-    border: 6px solid rgba(255,255,255,0.3);
-    background: rgba(255,255,255,0.12);
-    display: flex; flex-direction: column;
-    align-items: center; justify-content: center;
-    margin-bottom: 8mm;
+  .cover-logo-img { height: 9mm; }
+  .cover-title {
+    font-family: 'TT Hoves Pro', sans-serif;
+    font-size: 32pt;
+    line-height: 1;
+    color: #FFFFFF;
+    margin: 0 0 4mm;
   }
-  .cover-score-num { font-size: 32pt; font-weight: 900; line-height: 1; }
-  .cover-score-sub { font-size: 10pt; opacity: 0.75; }
-  .cover-brand { font-size: 22pt; font-weight: 700; margin: 4mm 0 2mm; }
-  .cover-subtitle { font-size: 11pt; opacity: 0.8; margin: 0; }
-  .cover-date { font-size: 9pt; opacity: 0.55; margin-top: auto; padding-top: 16mm; }
+  .cover-subtitle {
+    font-size: 12pt;
+    color: #8A8F99;
+    margin: 0 0 18mm;
+    max-width: 130mm;
+    line-height: 1.4;
+  }
+  .cover-score {
+    display: flex;
+    align-items: flex-end;
+    gap: 6mm;
+    margin-top: auto;
+  }
+  .cover-score-num {
+    font-family: 'TT Hoves Pro', sans-serif;
+    font-size: 96pt;
+    line-height: 0.9;
+    color: #A63D3D;
+  }
+  .cover-score-side {
+    padding-bottom: 8mm;
+  }
+  .cover-score-label {
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 9pt;
+    color: #8A8F99;
+    margin-bottom: 1.5mm;
+  }
+  .cover-score-verdict {
+    font-family: 'TT Hoves Pro', sans-serif;
+    font-size: 14pt;
+    color: #FFFFFF;
+    max-width: 90mm;
+    line-height: 1.2;
+  }
+  .cover-date {
+    margin-top: 8mm;
+    font-size: 9pt;
+    color: #8A8F99;
+    border-top: 1px solid #2F333B;
+    padding-top: 4mm;
+  }
 
   /* ===== СЕКЦИИ ===== */
   .section { margin-bottom: 12mm; }
   .section-title {
-    font-size: 14pt; font-weight: 700; color: #0066FF;
-    border-bottom: 2px solid #0066FF;
-    padding-bottom: 3mm; margin-bottom: 6mm;
+    font-family: 'TT Hoves Pro', sans-serif;
+    font-size: 16pt;
+    color: #15171A;
+    padding-bottom: 3mm;
+    margin-bottom: 6mm;
+    border-bottom: 2px solid #A63D3D;
   }
   .page-break { page-break-before: always; }
 
-  /* ===== КЛЮЧЕВЫЕ МЕТРИКИ ===== */
+  /* ===== МЕТРИКИ ===== */
   .metrics-grid {
     display: grid; grid-template-columns: repeat(4, 1fr);
     gap: 4mm; margin: 6mm 0;
   }
   .metric-card {
-    background: #F2F2F7; border-radius: 6px;
+    background: #FFFFFF;
+    border: 1px solid #D9D5CC;
+    border-radius: 10px;
     padding: 5mm 4mm; text-align: center;
   }
-  .metric-val { font-size: 20pt; font-weight: 900; color: #0066FF; line-height: 1; }
-  .metric-label { font-size: 8pt; color: #8E8E93; margin-top: 1mm; }
+  .metric-val {
+    font-family: 'TT Hoves Pro', sans-serif;
+    font-size: 22pt;
+    color: #A63D3D;
+    line-height: 1;
+  }
+  .metric-label { font-size: 8pt; color: #6E7480; margin-top: 1.5mm; text-transform: uppercase; letter-spacing: 0.08em; }
 
   /* ===== SUMMARY ===== */
   .summary-verdict {
-    font-size: 13pt; font-weight: 700;
-    background: #F2F2F7; border-left: 4px solid #0066FF;
-    padding: 4mm 5mm; border-radius: 4px; margin-bottom: 5mm;
+    font-family: 'TT Hoves Pro', sans-serif;
+    font-size: 14pt;
+    background: #FFFFFF;
+    border-left: 4px solid #A63D3D;
+    padding: 5mm 6mm; border-radius: 4px; margin-bottom: 5mm;
+    color: #15171A;
   }
 
   /* ===== SCORE ===== */
-  .score-block {
-    display: flex; align-items: center; gap: 10mm; margin: 6mm 0;
-  }
+  .score-block { display: flex; align-items: center; gap: 10mm; margin: 6mm 0; }
   .score-img { width: 50mm; }
   .score-components { flex: 1; }
-  .score-row {
-    display: flex; align-items: center; gap: 3mm; margin-bottom: 3mm;
-  }
-  .score-bar-wrap { flex: 1; background: #E5E5EA; border-radius: 4px; height: 6px; }
-  .score-bar { height: 6px; border-radius: 4px; background: #0066FF; }
-  .score-bar-label { width: 36mm; font-size: 8.5pt; color: #8E8E93; }
-  .score-bar-pct { width: 12mm; text-align: right; font-size: 8.5pt; font-weight: 700; }
+  .score-row { display: flex; align-items: center; gap: 3mm; margin-bottom: 3mm; }
+  .score-bar-wrap { flex: 1; background: #E7E2D6; border-radius: 4px; height: 6px; }
+  .score-bar { height: 6px; border-radius: 4px; background: #A63D3D; }
+  .score-bar-label { width: 38mm; font-size: 8.5pt; color: #6E7480; }
+  .score-bar-pct { width: 12mm; text-align: right; font-size: 8.5pt; font-family: 'TT Hoves Pro', sans-serif; color: #15171A; }
 
   /* ===== ТАБЛИЦЫ ===== */
   table { width: 100%; border-collapse: collapse; font-size: 9pt; }
-  th { background: #0066FF; color: #fff; padding: 3mm 4mm; text-align: left; font-weight: 600; }
-  td { padding: 2.5mm 4mm; border-bottom: 1px solid #E5E5EA; }
+  th {
+    background: #15171A; color: #F4F1EA;
+    padding: 3mm 4mm; text-align: left;
+    font-family: 'TT Hoves Pro', sans-serif;
+    font-weight: 700;
+    font-size: 9pt;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  td { padding: 2.5mm 4mm; border-bottom: 1px solid #E7E2D6; color: #15171A; background: #FFFFFF; }
   tr:last-child td { border-bottom: none; }
-  tr.client-row td { background: #E8F0FE; font-weight: 700; }
-  tr:nth-child(even) td { background: #F9F9FB; }
-  tr.client-row:nth-child(even) td { background: #E8F0FE; }
+  tr.client-row td { background: #FBEDED; font-weight: 600; color: #15171A; }
+  tr:nth-child(even) td { background: #FAF7F0; }
+  tr.client-row:nth-child(even) td { background: #FBEDED; }
 
   /* ===== МОДЕЛИ ===== */
   .models-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4mm; margin-top: 5mm; }
   .model-card {
-    border: 1.5px solid #E5E5EA; border-radius: 8px;
+    background: #FFFFFF;
+    border: 1.5px solid #D9D5CC; border-radius: 10px;
     padding: 4mm; text-align: center;
   }
-  .model-card.active { border-color: #0066FF; }
-  .model-name { font-weight: 700; font-size: 9.5pt; margin-bottom: 2mm; }
-  .model-rate { font-size: 18pt; font-weight: 900; color: #0066FF; line-height: 1; }
-  .model-rate-label { font-size: 7.5pt; color: #8E8E93; }
-  .model-pos { font-size: 8.5pt; margin-top: 1.5mm; }
+  .model-card.active { border-color: #A63D3D; }
+  .model-name { font-family: 'TT Hoves Pro', sans-serif; font-size: 10pt; margin-bottom: 2mm; }
+  .model-rate { font-family: 'TT Hoves Pro', sans-serif; font-size: 20pt; color: #A63D3D; line-height: 1; }
+  .model-rate-label { font-size: 7.5pt; color: #6E7480; text-transform: uppercase; letter-spacing: 0.08em; }
+  .model-pos { font-size: 8.5pt; margin-top: 1.5mm; color: #15171A; }
   .sentiment-badge {
-    display: inline-block; padding: 0.5mm 2mm;
+    display: inline-block; padding: 0.5mm 2.5mm;
     border-radius: 3px; font-size: 7.5pt; font-weight: 600; margin-top: 1.5mm;
   }
-  .sentiment-positive { background: #D4EDDA; color: #155724; }
-  .sentiment-neutral  { background: #E2E3E5; color: #383D41; }
-  .sentiment-negative { background: #F8D7DA; color: #721C24; }
+  .sentiment-positive { background: rgba(59,167,118,0.15); color: #237854; border: 1px solid rgba(59,167,118,0.35); }
+  .sentiment-neutral  { background: #ECE7DA; color: #4E535C; border: 1px solid #D9D5CC; }
+  .sentiment-negative { background: rgba(185,58,58,0.12); color: #7C1F1F; border: 1px solid rgba(185,58,58,0.35); }
 
   /* ===== ЧАТ-БАБЛЫ ===== */
   .chat-mockup {
-    border: 1.5px solid #E5E5EA; border-radius: 10px;
+    background: #FFFFFF;
+    border: 1px solid #D9D5CC; border-radius: 12px;
     overflow: hidden; margin-bottom: 5mm;
     page-break-inside: avoid;
   }
   .chat-header {
     display: flex; align-items: center; gap: 2mm;
-    padding: 3mm 4mm; font-size: 8.5pt; font-weight: 700;
+    padding: 3mm 4mm; font-size: 9pt;
+    font-family: 'TT Hoves Pro', sans-serif;
+    background: #ECE7DA; color: #15171A;
+    border-bottom: 1px solid #D9D5CC;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
   }
-  .chat-header.chatgpt  { background: #f7f7f8; color: #1C1C1E; }
-  .chat-header.yandex   { background: #FFFDE7; color: #5D4037; }
-  .chat-header.gigachat { background: #E8F5E9; color: #2E7D32; }
-  .chat-header.gemini   { background: #E3F2FD; color: #1565C0; }
-  .chat-header.deepseek { background: #EDE7F6; color: #4527A0; }
-  .chat-header.alisa    { background: #FCE4EC; color: #880E4F; }
-  .chat-header.perplexity { background: #F3E5F5; color: #6A1B9A; }
+  .chat-header.chatgpt,
+  .chat-header.yandex,
+  .chat-header.gigachat,
+  .chat-header.gemini,
+  .chat-header.deepseek,
+  .chat-header.alisa,
+  .chat-header.perplexity { background: #ECE7DA; color: #15171A; }
   .user-msg {
-    background: #0066FF; color: #fff;
+    background: #A63D3D; color: #fff;
     padding: 2.5mm 4mm; margin: 3mm 3mm 3mm auto;
     border-radius: 10px 10px 2px 10px;
-    font-size: 8.5pt; max-width: 80%; width: fit-content;
+    font-size: 9pt; max-width: 80%; width: fit-content;
   }
   .ai-msg {
-    background: #F2F2F7; color: #1C1C1E;
+    background: #F4F1EA; color: #15171A;
     padding: 2.5mm 4mm; margin: 3mm auto 3mm 3mm;
     border-radius: 10px 10px 10px 2px;
-    font-size: 8.5pt; max-width: 90%;
+    font-size: 9pt; max-width: 90%;
+    border: 1px solid #D9D5CC;
   }
   .chat-footer {
     padding: 1.5mm 4mm 3mm;
-    font-size: 7pt; color: #8E8E93;
+    font-size: 7.5pt; color: #6E7480;
     display: flex; justify-content: space-between;
   }
 
@@ -174,28 +282,33 @@
     page-break-inside: avoid;
   }
   .rec-priority {
-    width: 8mm; height: 8mm; border-radius: 50%;
-    background: #0066FF; color: #fff;
+    width: 9mm; height: 9mm; border-radius: 50%;
+    background: transparent;
+    border: 2px solid #A63D3D;
+    color: #A63D3D;
     display: flex; align-items: center; justify-content: center;
-    font-weight: 900; font-size: 10pt; flex-shrink: 0;
+    font-family: 'TT Hoves Pro', sans-serif;
+    font-size: 11pt; flex-shrink: 0;
   }
   .rec-body { flex: 1; }
-  .rec-title { font-weight: 700; font-size: 10.5pt; margin-bottom: 1.5mm; }
-  .rec-desc { color: #3A3A3C; font-size: 9pt; margin-bottom: 1.5mm; }
-  .rec-impact { font-size: 8.5pt; color: #34C759; }
+  .rec-title { font-family: 'TT Hoves Pro', sans-serif; font-size: 11pt; margin-bottom: 1.5mm; color: #15171A; }
+  .rec-desc { color: #15171A; font-size: 9pt; margin-bottom: 1.5mm; line-height: 1.5; }
+  .rec-impact { font-size: 8.5pt; color: #3BA776; font-weight: 600; }
   .effort-badge {
-    display: inline-block; padding: 0.5mm 2mm; border-radius: 3px;
+    display: inline-block; padding: 0.5mm 2.5mm; border-radius: 3px;
     font-size: 7.5pt; font-weight: 600; margin-left: 2mm;
+    text-transform: uppercase; letter-spacing: 0.06em;
   }
-  .effort-low    { background: #D4EDDA; color: #155724; }
-  .effort-medium { background: #FFF3CD; color: #856404; }
-  .effort-high   { background: #F8D7DA; color: #721C24; }
+  .effort-low    { background: rgba(59,167,118,0.15); color: #237854; }
+  .effort-medium { background: rgba(210,154,60,0.18); color: #8C6420; }
+  .effort-high   { background: rgba(185,58,58,0.15); color: #7C1F1F; }
 
   /* ===== ЗАМЕТКА ЭКСПЕРТА ===== */
   .expert-note-block {
     display: flex; gap: 5mm; align-items: flex-start;
-    background: linear-gradient(135deg, #F0F4FF, #E8F5E9);
-    border-left: 4px solid #0066FF;
+    background: #FFFFFF;
+    border: 1px solid #D9D5CC;
+    border-left: 4px solid #A63D3D;
     border-radius: 8px; padding: 5mm; margin: 6mm 0;
     page-break-inside: avoid;
   }
@@ -203,31 +316,36 @@
     width: 14mm; height: 14mm; border-radius: 50%;
   }
   .expert-note-text { flex: 1; }
-  .expert-note-name { font-weight: 700; font-size: 9.5pt; }
-  .expert-note-title { font-size: 8pt; color: #8E8E93; margin-top: 0.5mm; }
-  .expert-note-content { font-size: 9pt; margin-top: 2mm; font-style: italic; }
+  .expert-note-name { font-family: 'TT Hoves Pro', sans-serif; font-size: 10pt; color: #15171A; }
+  .expert-note-title { font-size: 8pt; color: #6E7480; margin-top: 0.5mm; text-transform: uppercase; letter-spacing: 0.08em; }
+  .expert-note-content { font-size: 9pt; margin-top: 2mm; font-style: italic; color: #15171A; }
 
-  /* ===== CTA ФИНАЛЬНАЯ ===== */
+  /* ===== ФИНАЛЬНАЯ CTA ===== */
   .final-cta {
-    background: linear-gradient(135deg, #0055D4, #003A9B);
-    color: #fff; border-radius: 10px;
+    background: #15171A;
+    color: #F4F1EA; border-radius: 12px;
     padding: 8mm; text-align: center; margin-top: 8mm;
     page-break-inside: avoid;
+    position: relative;
+    overflow: hidden;
   }
-  .final-cta h2 { font-size: 14pt; margin: 0 0 3mm; }
-  .final-cta p  { font-size: 9.5pt; opacity: 0.85; margin: 0 0 5mm; }
-  .final-cta-contact { font-size: 10pt; font-weight: 700; }
+  .final-cta h2 {
+    font-family: 'TT Hoves Pro', sans-serif;
+    font-size: 16pt; margin: 0 0 3mm; color: #FFFFFF;
+  }
+  .final-cta p  { font-size: 10pt; color: #C9CCD2; margin: 0 0 5mm; max-width: 130mm; margin-left: auto; margin-right: auto; }
+  .final-cta-contact { font-size: 10pt; font-family: 'TT Hoves Pro', sans-serif; color: #A63D3D; }
 
   /* ===== МЕТОДОЛОГИЯ ===== */
-  .methodology { font-size: 8pt; color: #8E8E93; line-height: 1.6; }
+  .methodology { font-size: 8pt; color: #6E7480; line-height: 1.6; }
 </style>
 </head>
 <body>
 
-<!-- FOOTER (запускается на каждой странице) -->
+<!-- FOOTER (запускается на каждой странице кроме обложки) -->
 <div id="page-footer">
-  <span>{{ STUDIO_NAME }} — AI Visibility Report</span>
-  <span>{{ brand_name }} · {{ report_date }}</span>
+  <span>CatCore GEO Studio &mdash; AI Visibility Report</span>
+  <span>{{ brand_name }} &middot; {{ report_date }}</span>
 </div>
 
 {% include "report_partials/cover.html" %}

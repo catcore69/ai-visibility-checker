@@ -29,12 +29,25 @@ logger = get_logger(__name__)
 TEMPLATES_DIR = Path(__file__).parent.parent.parent / "templates"
 
 
+# ===== Цветовая палитра PDF (светлый брендбук CatCore) =====
+PAPER_BG       = "#F4F1EA"
+PAPER_SURFACE  = "#FFFFFF"
+PAPER_BORDER   = "#D9D5CC"
+PAPER_TEXT     = "#15171A"
+PAPER_MUTED    = "#6E7480"
+ACCENT_RED     = "#A63D3D"
+ACCENT_DEEP    = "#7C1F1F"
+COLOR_SUCCESS  = "#3BA776"
+COLOR_WARNING  = "#D29A3C"
+COLOR_DANGER   = "#B93A3A"
+
+
 def _score_color(score: int) -> str:
     if score >= 60:
-        return "#34C759"
+        return COLOR_SUCCESS
     if score >= 30:
-        return "#FF9500"
-    return "#FF3B30"
+        return COLOR_WARNING
+    return COLOR_DANGER
 
 
 def _make_score_chart(score: int) -> str:
@@ -47,12 +60,12 @@ def _make_score_chart(score: int) -> str:
     wedges, _ = ax.pie(
         [score, remaining],
         startangle=90,
-        colors=[color, "#F2F2F7"],
-        wedgeprops={"width": 0.4, "edgecolor": "white", "linewidth": 2},
+        colors=[color, PAPER_BORDER],
+        wedgeprops={"width": 0.4, "edgecolor": PAPER_SURFACE, "linewidth": 2},
     )
 
     ax.text(0, 0, str(score), ha="center", va="center", fontsize=36, fontweight="bold", color=color)
-    ax.text(0, -0.35, "/ 100", ha="center", va="center", fontsize=14, color="#8E8E93")
+    ax.text(0, -0.35, "/ 100", ha="center", va="center", fontsize=14, color=PAPER_MUTED)
 
     plt.tight_layout(pad=0)
     buf = io.BytesIO()
@@ -68,7 +81,7 @@ def _make_competitor_chart(comparison: list[dict]) -> str:
 
     brands = [c["brand_name"] for c in reversed(comparison)]
     scores = [c["score"] for c in reversed(comparison)]
-    colors = ["#0066FF" if c["is_client"] else "#C7C7CC" for c in reversed(comparison)]
+    colors = [ACCENT_RED if c["is_client"] else "#BDB8AD" for c in reversed(comparison)]
 
     bars = ax.barh(brands, scores, color=colors, height=0.6, edgecolor="none")
 
@@ -79,14 +92,17 @@ def _make_competitor_chart(comparison: list[dict]) -> str:
             str(score),
             va="center",
             fontsize=11,
-            color="#1C1C1E",
+            color=PAPER_TEXT,
         )
 
     ax.set_xlim(0, 105)
-    ax.set_xlabel("AI Visibility Score", fontsize=11)
+    ax.set_xlabel("AI Visibility Score", fontsize=11, color=PAPER_TEXT)
+    ax.tick_params(colors=PAPER_TEXT)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
-    ax.axvline(x=50, color="#FF9500", linestyle="--", alpha=0.5, linewidth=1)
+    ax.spines["left"].set_color(PAPER_BORDER)
+    ax.spines["bottom"].set_color(PAPER_BORDER)
+    ax.axvline(x=50, color=COLOR_WARNING, linestyle="--", alpha=0.5, linewidth=1)
 
     plt.tight_layout()
     buf = io.BytesIO()
@@ -111,7 +127,7 @@ def _make_sentiment_pie(analysis: Analysis, brand_name: str) -> str:
     fig, ax = plt.subplots(figsize=(4, 4))
     labels = ["Позитивные", "Нейтральные", "Негативные"]
     sizes = [pos, neu, neg]
-    colors = ["#34C759", "#8E8E93", "#FF3B30"]
+    colors = [COLOR_SUCCESS, PAPER_MUTED, COLOR_DANGER]
     explode = (0.05, 0, 0.05)
 
     ax.pie(
@@ -184,7 +200,7 @@ def _mark_competitors_red(text: str, competitors: list[str]) -> str:
     for comp in competitors:
         pattern = re.compile(re.escape(comp), re.IGNORECASE)
         text = pattern.sub(
-            f'<span style="color:#FF3B30; font-weight:bold;">{comp}</span>', text
+            f'<span style="color:{ACCENT_RED}; font-weight:600;">{comp}</span>', text
         )
     return text
 
