@@ -27,7 +27,13 @@ MODEL_META: dict[str, dict[str, str]] = {
     "chatgpt":    {"display": "ChatGPT",     "short": "GPT",  "css": "model-chatgpt"},
     "openai":     {"display": "ChatGPT",     "short": "GPT",  "css": "model-chatgpt"},
     "yandexgpt":  {"display": "YandexGPT",   "short": "Я.GPT", "css": "model-yandex"},
-    "alisa":      {"display": "Алиса",       "short": "Алиса", "css": "model-alisa"},
+    # Этап 2.4 ТЗ: честное имя источника — XMLRiver SERP с AI-блоком,
+    # не голосовой ассистент Алиса (прямого API у неё нет).
+    "yandex_ai_search": {"display": "Яндекс-поиск с AI-блоком", "short": "Я.AI", "css": "model-yandex-ai"},
+    # Совместимость со старыми отчётами, где ключ был "alisa".
+    # Миграция 003 переименовывает ключ в существующих JSONB, но если где-то
+    # остался — отрисуется под новым именем.
+    "alisa":      {"display": "Яндекс-поиск с AI-блоком", "short": "Я.AI", "css": "model-yandex-ai"},
     "gigachat":   {"display": "GigaChat",    "short": "Giga", "css": "model-gigachat"},
     "gemini":     {"display": "Gemini",      "short": "Gemini", "css": "model-gemini"},
     "deepseek":   {"display": "DeepSeek",    "short": "DS",   "css": "model-deepseek"},
