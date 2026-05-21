@@ -7,10 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.analyzer import analyze_responses
-from app.core.competitor_finder import find_competitors
+from app.core.competitor_finder import find_competitor_url, find_competitors
+from app.core.gap_analyzer import build_gap_analysis
 from app.core.niche_detector import detect_niche
 from app.core.prompt_generator import generate_prompts
 from app.core.recommender import generate_recommendations
+from app.core.site_analyzer import analyze_site
 from app.core.scorer import (
     calculate_visibility_score,
     calculate_share_of_voice,
@@ -25,7 +27,8 @@ logger = get_logger(__name__)
 PROGRESS_MESSAGES = {
     "niche_detection": "Определяем нишу вашего бизнеса...",
     "competitor_discovery": "Подбираем ваших главных конкурентов...",
-    "prompt_generation": "Генерируем 15 типичных запросов клиентов...",
+    "site_analysis": "Анализируем структуру вашего сайта и сайтов конкурентов...",
+    "prompt_generation": "Генерируем 10 типичных запросов клиентов...",
     "polling_models": "Опрашиваем ИИ-ассистентов: ChatGPT, YandexGPT, Алиса, GigaChat, Gemini, DeepSeek...",
     "analyzing_responses": "Анализируем 90+ ответов ИИ-моделей...",
     "calculating_score": "Считаем AI Visibility Score...",
@@ -41,7 +44,7 @@ def _build_pollers(cache, config) -> list:
     """Создаёт поллеры для включённых моделей."""
     from app.llm_pollers.openai_poller import OpenAIPoller
     from app.llm_pollers.yandex_poller import YandexGPTPoller
-    from app.llm_pollers.alisa_poller import AlisaPoller
+    from app.llm_pollers.yandex_ai_search_poller import YandexAISearchPoller
     from app.llm_pollers.gigachat_poller import GigaChatPoller
     from app.llm_pollers.gemini_poller import GeminiPoller
     from app.llm_pollers.deepseek_poller import DeepSeekPoller
@@ -50,7 +53,9 @@ def _build_pollers(cache, config) -> list:
     all_pollers = {
         "chatgpt": OpenAIPoller,
         "yandexgpt": YandexGPTPoller,
-        "alisa": AlisaPoller,
+        # Этап 2.4 ТЗ: "alisa" → "yandex_ai_search" (это XMLRiver SERP с AI-блоком,
+        # не голосовой ассистент). Старый ключ "alisa" остаётся в БД мигрированным.
+        "yandex_ai_search": YandexAISearchPoller,
         "gigachat": GigaChatPoller,
         "gemini": GeminiPoller,
         "deepseek": DeepSeekPoller,
@@ -148,6 +153,61 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
             competitors=competitors,
             competitors_source=competitors_source,
         )
+
+        # ШАГ 3.5: Анализ сайтов клиента и конкурентов (Этап 2 ТЗ).
+        # Делаем параллельно, исключения внутри analyze_site не роняют pipeline.
+        await update_report_status(db, report_id, "site_analysis", progress=22)
+        try:
+            # URL конкурентов через XMLRiver — у нас только имена.
+            url_tasks = [find_competitor_url(name, report.region) for name in (competitors or [])]
+            urls = await asyncio.gather(*url_tasks, return_exceptions=True)
+            competitor_urls: list[dict] = []
+            sites_to_analyse: list[tuple[str, str]] = []  # (name, url)
+            for name, url_result in zip(competitors or [], urls):
+                url = url_result if isinstance(url_result, str) else None
+                competitor_urls.append({"name": name, "url": url})
+                if url:
+                    sites_to_analyse.append((name, url))
+
+            # Параллельный анализ: клиент + все конкуренты с найденным URL
+            site_tasks = [analyze_site(report.url)] + [
+                analyze_site(url) for _, url in sites_to_analyse
+            ]
+            site_results = await asyncio.gather(*site_tasks, return_exceptions=True)
+
+            client_site_analysis = (
+                site_results[0]
+                if site_results and not isinstance(site_results[0], Exception)
+                else None
+            )
+            competitors_site_analysis = []
+            for res in site_results[1:]:
+                if isinstance(res, Exception):
+                    logger.warning("site_analyze_one_failed", error=str(res))
+                    continue
+                competitors_site_analysis.append(res)
+
+            # Лидер по SoV — определим позже, пока передаём None,
+            # gap_analyzer возьмёт первого с fetched=True.
+            gap = build_gap_analysis(
+                client_site_analysis,
+                competitors_site_analysis,
+                competitor_urls,
+                leader_name=None,
+            )
+
+            await update_report_field(
+                db,
+                report_id,
+                competitor_urls=competitor_urls,
+                client_site_analysis=client_site_analysis,
+                competitors_site_analysis=competitors_site_analysis,
+                gap_analysis=gap,
+            )
+        except Exception as exc:
+            logger.error("site_analysis_step_failed", error=str(exc), error_type=type(exc).__name__)
+            # Не блокируем pipeline — без site-analysis отчёт всё равно собирается.
+
         await update_report_status(db, report_id, "prompt_generation", progress=25)
 
         # ШАГ 4: Промпты

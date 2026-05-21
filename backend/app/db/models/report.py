@@ -64,6 +64,13 @@ class Report(Base):
     raw_responses = Column(JSONB, nullable=True)
     analysis = Column(JSONB, nullable=True)
 
+    # Этап 2 ТЗ: анализ сайтов клиента и конкурентов через site_analyzer.
+    # Источник данных для страницы 6 PDF ("что есть у лидера, чего нет у вас").
+    client_site_analysis = Column(JSONB, nullable=True)
+    competitors_site_analysis = Column(JSONB, nullable=True)
+    competitor_urls = Column(JSONB, nullable=True)  # [{name, url}, ...]
+    gap_analysis = Column(JSONB, nullable=True)  # {client_has, client_lacks, key_gaps, ...}
+
     # Метрики
     visibility_score = Column(Integer, nullable=True)
     presence_rate = Column(Integer, nullable=True)

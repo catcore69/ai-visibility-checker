@@ -6,12 +6,21 @@ import httpx
 from app.llm_pollers.base import BasePoller, RateLimitError
 
 
-class AlisaPoller(BasePoller):
-    """Получает AI-ответ Яндекс Нейро через XMLRiver SERP API."""
+class YandexAISearchPoller(BasePoller):
+    """Парсит выдачу Яндекса с AI-блоком (Нейро) через XMLRiver SERP API.
 
-    name = "alisa"
-    display_name = "Алиса (Яндекс Нейро)"
-    model = "yandex-neuro-search"
+    Источник называется честно — это не "Алиса" (прямого API у голосового
+    ассистента нет), а Яндекс-поиск с AI-сгенерированным блоком. Эта же выдача
+    лежит в основе ответов Алисы — поэтому данные близки к тому, что услышит
+    пользователь Алисы, хотя и не идентичны.
+
+    Алиас AlisaPoller сохранён в __init__.py для обратной совместимости
+    импортов в pipeline.
+    """
+
+    name = "yandex_ai_search"
+    display_name = "Яндекс-поиск с AI-блоком"
+    model = "yandex-ai-search"
 
     async def _query_raw(self, prompt: str) -> str:
         url = "https://xmlriver.com/search/xml"
@@ -41,7 +50,7 @@ class AlisaPoller(BasePoller):
                 )
                 return f"[AI-ответ недоступен для запроса] Топ-3 Яндекс: {summary}"
 
-            return "[AI-ответ Алисы недоступен для этого запроса]"
+            return "[AI-блок в Яндекс-выдаче недоступен для этого запроса]"
 
     def _extract_neuro_block(self, xml_text: str) -> Optional[str]:
         """Извлекает текст блока Нейро из ответа XMLRiver."""

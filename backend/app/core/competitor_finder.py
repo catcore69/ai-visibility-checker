@@ -1,6 +1,9 @@
 import json
+import xml.etree.ElementTree as ET
 from typing import Any, Optional
+from urllib.parse import urlparse
 
+import httpx
 from openai import AsyncOpenAI
 
 from app.config import settings
@@ -8,6 +11,93 @@ from app.core.llm_prompts import COMPETITOR_FINDER_PROMPT
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+# Хосты, которые не считаем сайтом конкурента (агрегаторы, маркетплейсы, соцсети).
+# Когда ищем сайт по имени бренда через SERP — пропускаем эти результаты.
+_COMPETITOR_URL_BLACKLIST = {
+    "vk.com", "instagram.com", "facebook.com", "ok.ru", "youtube.com",
+    "t.me", "twitter.com", "x.com", "tiktok.com",
+    "ozon.ru", "wildberries.ru", "wb.ru", "avito.ru", "youla.ru",
+    "drom.ru", "auto.ru", "cian.ru", "yandex.market", "market.yandex.ru",
+    "sbermegamarket.ru", "megamarket.ru",
+    "2gis.ru", "yandex.ru", "ya.ru", "google.com", "google.ru",
+    "tripadvisor.ru", "tripadvisor.com", "booking.com", "ostrovok.ru",
+    "wikipedia.org", "ru.wikipedia.org",
+}
+
+
+def _domain_of(url: str) -> str:
+    try:
+        host = urlparse(url).netloc.lower()
+        if host.startswith("www."):
+            host = host[4:]
+        return host
+    except Exception:
+        return ""
+
+
+def _is_blacklisted_host(host: str) -> bool:
+    for b in _COMPETITOR_URL_BLACKLIST:
+        if host == b or host.endswith("." + b):
+            return True
+    return False
+
+
+async def find_competitor_url(name: str, region: str = "Россия") -> Optional[str]:
+    """Ищет официальный сайт конкурента через XMLRiver SERP.
+
+    Возвращает URL первого результата, не принадлежащего агрегатору.
+    None — если не нашли или XMLRiver недоступен.
+    """
+    name = (name or "").strip()
+    if not name:
+        return None
+    if not settings.XMLRIVER_USER or not settings.XMLRIVER_KEY:
+        logger.warning("find_competitor_url_no_xmlriver_creds")
+        return None
+
+    lr = (
+        settings.XMLRIVER_REGION_BY
+        if "беларус" in region.lower() or "by" in region.lower()
+        else settings.XMLRIVER_REGION_RU
+    )
+    query = f"{name} официальный сайт"
+
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.get(
+                "https://xmlriver.com/search/xml",
+                params={
+                    "user": settings.XMLRIVER_USER,
+                    "key": settings.XMLRIVER_KEY,
+                    "query": query,
+                    "groupby": "10",
+                    "lr": lr,
+                },
+            )
+            response.raise_for_status()
+    except Exception as exc:
+        logger.warning("find_competitor_url_serp_error", name=name, error=str(exc))
+        return None
+
+    try:
+        root = ET.fromstring(response.text)
+        for doc in root.findall(".//doc"):
+            url_el = doc.find("url")
+            if url_el is None or not url_el.text:
+                continue
+            url = url_el.text.strip()
+            host = _domain_of(url)
+            if not host or _is_blacklisted_host(host):
+                continue
+            # Берём только корень домена (без длинных путей с трекингом)
+            parsed = urlparse(url)
+            return f"{parsed.scheme}://{parsed.netloc}/"
+    except ET.ParseError as exc:
+        logger.warning("find_competitor_url_parse_error", name=name, error=str(exc))
+
+    return None
 
 
 async def _find_competitors_via_llm(

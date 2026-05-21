@@ -45,6 +45,9 @@ google-auth==2.35.0
 # Text analysis
 rapidfuzz==3.10.0
 
+# HTML parsing — для site_analyzer (Этап 2 ТЗ)
+beautifulsoup4==4.12.3
+
 # URL parsing
 tldextract==5.1.2
 

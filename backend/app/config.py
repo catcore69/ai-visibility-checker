@@ -38,7 +38,8 @@ class Settings(BaseSettings):
     XMLRIVER_REGION_BY: str = "157"
 
     # === Pipeline ===
-    ENABLED_MODELS: str = "chatgpt,yandexgpt,alisa,gigachat,gemini,deepseek,perplexity"
+    # Этап 2.4 ТЗ: "alisa" заменён на "yandex_ai_search" (честное имя XMLRiver SERP).
+    ENABLED_MODELS: str = "chatgpt,yandexgpt,yandex_ai_search,gigachat,gemini,deepseek,perplexity"
     # Этап 1.3 ТЗ: снижено с 15 до 10 (4 рек / 3 срав / 2 проб / 1 транз)
     PROMPTS_PER_REPORT: int = 10
     COMPETITORS_PER_REPORT: int = 5
@@ -60,7 +61,9 @@ class Settings(BaseSettings):
     YANDEX_MAX_RPM: int = 100
     GIGACHAT_MAX_RPM: int = 50
     PERPLEXITY_MAX_RPM: int = 50
-    ALISA_MAX_RPM: int = 100
+    # Этап 2.4: переименовано из ALISA_MAX_RPM. Старое имя env-переменной
+    # сохраняем через alias ниже — чтобы prod не упал, пока не обновят .env.
+    YANDEX_AI_SEARCH_MAX_RPM: int = 100
 
     # === Celery ===
     CELERY_WORKER_CONCURRENCY: int = 2
@@ -141,7 +144,7 @@ class Settings(BaseSettings):
         return {
             "chatgpt": self.OPENAI_MAX_RPM,
             "yandexgpt": self.YANDEX_MAX_RPM,
-            "alisa": self.ALISA_MAX_RPM,
+            "yandex_ai_search": self.YANDEX_AI_SEARCH_MAX_RPM,
             "gigachat": self.GIGACHAT_MAX_RPM,
             "gemini": self.GEMINI_MAX_RPM,
             "deepseek": self.DEEPSEEK_MAX_RPM,
