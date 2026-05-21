@@ -83,7 +83,12 @@ class EmailSender:
         )
 
     async def send_report_ready(self, report) -> bool:
-        report_url = f"{self.config.STUDIO_FULL_URL}/otchet/{report.id}"
+        base = self.config.STUDIO_FULL_URL.rstrip("/")
+        report_url = f"{base}/otchet/{report.id}"
+        # Скачивание PDF идёт через НАШ домен (а не через прямую ссылку на S3) —
+        # иначе Avast/Касперский флагят `s3.twcstorage.ru` как фишинг и часть
+        # клиентов не может открыть отчёт.
+        pdf_url = f"{base}/api/v1/report/{report.id}/pdf/file"
         return await self.send(
             to_email=report.email,
             subject=f"AI Visibility Score {report.brand_name}: {report.visibility_score}/100",
@@ -92,7 +97,7 @@ class EmailSender:
                 "brand_name": report.brand_name,
                 "score": report.visibility_score,
                 "report_url": report_url,
-                "pdf_url": report.pdf_url,
+                "pdf_url": pdf_url,
                 "expert_note": report.expert_note,
             },
         )
