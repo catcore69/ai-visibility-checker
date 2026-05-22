@@ -1,51 +1,136 @@
-<!-- ===== РЕКОМЕНДАЦИИ ===== -->
+<!-- ===== СТРАНИЦА 7 ТЗ — ЧТО ДЕЛАТЬ =====
+     Три уровня действий. Уровень 1 — выполнимо самому, но не закрывает
+     главный разрыв (клиент упирается, понимает «нужны специалисты»).
+     Уровень 2 — структурная переработка. Уровень 3 — два пакета. -->
 <div class="section page-break">
-  <div class="section-title">Рекомендации по улучшению AI Visibility</div>
+  <p class="eyebrow">07 — Что делать</p>
+  <div class="section-title">План действий — три уровня</div>
 
-  <p style="font-size:9pt; color:#15171A; margin-bottom:6mm;">
-    На основе анализа сформированы персонализированные рекомендации для бренда
-    <strong>«{{ brand_name }}»</strong>. Рекомендации отсортированы по приоритету:
-    чем выше — тем больший эффект даст в первую очередь.
-  </p>
-
-  <!-- Рекомендации -->
-  {% for rec in recommendations %}
-  <div class="rec-item">
-    <div class="rec-priority">{{ loop.index }}</div>
-    <div class="rec-body">
-      <div class="rec-title">
-        {{ rec.title }}
-        <span class="effort-badge effort-{{ rec.effort | lower }}">
-          {% if rec.effort == 'low' %}Простая задача
-          {% elif rec.effort == 'medium' %}Средние усилия
-          {% else %}Требует ресурсов{% endif %}
-        </span>
-      </div>
-      <div class="rec-desc">{{ rec.description }}</div>
-      {% if rec.impact %}
-      <div class="rec-impact">
-        ↑ Ожидаемый эффект: {{ rec.impact }}
-      </div>
-      {% endif %}
-      {% if rec.action_items %}
-      <ul style="margin:1.5mm 0 0; padding-left:4mm; font-size:8.5pt; color:#15171A;">
-        {% for action in rec.action_items %}
-        <li>{{ action }}</li>
-        {% endfor %}
+  <!-- УРОВЕНЬ 1 — самому за неделю -->
+  <div class="level-block">
+    <div class="level-num">1</div>
+    <div class="level-body">
+      <p class="level-title">Что можно сделать самостоятельно за неделю</p>
+      <p class="level-sub">Базовые улучшения, которые повышают видимость, но не закрывают главный разрыв с лидером.</p>
+      <ul class="level-list">
+        <li>
+          <strong>Добавить FAQ-блок на главную страницу</strong> — минимум 8 вопросов
+          с разметкой <code>schema.org/FAQPage</code>. ИИ берёт такие блоки в первую очередь.
+        </li>
+        <li>
+          <strong>Создать файл <code>/llms.txt</code> в корне сайта</strong> с описанием
+          бизнеса в формате, удобном для языковых моделей. Это новый стандарт, мало кто
+          его пока имеет — для вас это явное преимущество.
+        </li>
+        <li>
+          <strong>Добавить страницу «О компании»</strong> с явным указанием опыта,
+          лицензий, авторства, фактов о команде. Это основной источник для ИИ-моделей
+          о бренде.
+        </li>
       </ul>
-      {% endif %}
     </div>
   </div>
-  {% endfor %}
 
-  <!-- Экспертная заметка (если есть) -->
+  <!-- УРОВЕНЬ 2 — структурная переработка -->
+  <div class="level-block">
+    <div class="level-num">2</div>
+    <div class="level-body">
+      <p class="level-title">Что требует структурной переработки</p>
+      <p class="level-sub">Без рук специалистов сделать сложно — нужна стратегия и опыт.</p>
+      <ul class="level-list">
+        <li>
+          <strong>Перестроить структуру сайта под промпт-кластеры вашей ниши</strong> —
+          {{ prompts_count }} запросов, на которых строится анализ, можно сгруппировать
+          в 3–5 кластеров. Под каждый кластер — отдельная страница-«хаб».
+        </li>
+        <li>
+          <strong>Внедрить entity-based разметку</strong>: связать сущности (бренд,
+          услуги, локации, экспертов) через schema.org так, чтобы ИИ видел структурный
+          граф бренда, а не разрозненные тексты.
+        </li>
+        <li>
+          <strong>Получить упоминания на отраслевых площадках</strong> вашей ниши.
+          Без внешних упоминаний модели не «доверяют» бренду — а доверие в ИИ-индексе
+          выстраивается медленно, поэтому начинать стоит сейчас.
+        </li>
+        <li>
+          <strong>Регулярный мониторинг AI Visibility Score</strong> — раз в 30 дней
+          смотреть динамику. Сама по себе цифра не главное, важна траектория.
+        </li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- УРОВЕНЬ 3 — что мы можем -->
+  <div class="level-block level-block-accent">
+    <div class="level-num">3</div>
+    <div class="level-body">
+      <p class="level-title">Как мы можем это сделать</p>
+      <p class="level-sub">Два пакета — для разных случаев. Финальный диагноз даст эксперт на звонке.</p>
+
+      <!-- Пакет «GEO-Доработка» -->
+      <div class="package">
+        <div class="package-head">
+          <span class="package-name">Пакет «GEO-Доработка»</span>
+          <span class="package-price">от {{ PACKAGE_DORABOTKA_PRICE_FROM }} ₽</span>
+        </div>
+        <p class="package-for">
+          <strong>Для кого:</strong> ваш текущий сайт технически в порядке (современный движок,
+          не самописка, не перегружен скриптами, актуальный дизайн). Структура есть — её нужно
+          дополнить и доработать под цитирование ИИ.
+        </p>
+        <p class="package-includes">
+          <strong>Что входит:</strong> аудит, переработка структуры контента под промпт-кластеры,
+          внедрение технических улучшений (llms.txt, schema-разметка, FAQ), создание
+          дополнительных страниц, продвижение на отраслевых площадках.
+        </p>
+        <div class="package-meta">
+          <span>Срок: <strong>30–45 дней</strong></span>
+          <span>Гарантия: рост Score минимум на <strong>{{ PACKAGE_GROWTH_PROMISE_POINTS }} пунктов</strong> за 90 дней</span>
+        </div>
+      </div>
+
+      <!-- Пакет «GEO-Сайт под ключ» -->
+      <div class="package">
+        <div class="package-head">
+          <span class="package-name">Пакет «GEO-Сайт под ключ»</span>
+          <span class="package-price">от {{ PACKAGE_FULL_SITE_PRICE_FROM }} ₽</span>
+        </div>
+        <p class="package-for">
+          <strong>Для кого:</strong> ваш текущий сайт устарел технически или морально —
+          самописный код с ошибками, перегружен скриптами, устаревший дизайн, низкая скорость,
+          или собран на конструкторе без возможности кастомизации. Точечная доработка
+          в таких случаях не даст результата — нужна полная переработка.
+        </p>
+        <p class="package-includes">
+          <strong>Что входит:</strong> создание нового сайта с нуля, изначально спроектированного
+          под цитирование ИИ. Архитектура, контент, разметка, скорость загрузки — всё под выдачу AI.
+          Часть существующих данных (контент, домен, накопленные позиции) мигрируется без потерь.
+        </p>
+        <div class="package-meta">
+          <span>Срок: <strong>45–60 дней</strong></span>
+          <span>Гарантия: появление в выдаче ИИ в течение <strong>90 дней</strong> после запуска</span>
+        </div>
+      </div>
+
+      <p class="package-cta">
+        <strong>Не уверены, какой пакет вам подходит?</strong> Это нормально — точный диагноз
+        даёт эксперт после короткого осмотра сайта. Запишитесь на 30-минутный разговор —
+        посмотрим сайт вживую и скажем честно, что нужно: доработка или полная переработка.
+        Без давления и попыток продать дороже.
+      </p>
+    </div>
+  </div>
+
+  <!-- Экспертная заметка — если есть -->
   {% if expert_note %}
   <div class="expert-note-block">
     {% if EXPERT_PHOTO_URL %}
     <img class="expert-note-avatar" src="{{ EXPERT_PHOTO_URL }}" alt="{{ EXPERT_NAME }}">
     {% else %}
     <div style="width:14mm; height:14mm; border-radius:50%; background:#A63D3D; display:flex;
-                align-items:center; justify-content:center; color:#fff; font-weight:900; font-size:14pt; flex-shrink:0;">
+                align-items:center; justify-content:center; color:#fff; font-weight:700;
+                font-size:14pt; flex-shrink:0;">
       {{ EXPERT_NAME[0] | default("E") }}
     </div>
     {% endif %}
@@ -56,100 +141,4 @@
     </div>
   </div>
   {% endif %}
-
-  <!-- Дорожная карта GEO (90 дней) -->
-  <div style="margin-top:8mm; page-break-inside:avoid;">
-    <p style="font-size:10pt; font-weight:700; margin-bottom:4mm;">
-      🗺️ Ориентировочная дорожная карта GEO-продвижения
-    </p>
-
-    <table style="font-size:8.5pt;">
-      <tr>
-        <th style="width:22%">Период</th>
-        <th style="width:42%">Ключевые действия</th>
-        <th style="width:18%; text-align:center;">Ожидаемый рост</th>
-        <th style="width:18%; text-align:center;">Метрика</th>
-      </tr>
-      <tr>
-        <td><strong>Месяц 1</strong><br><span style="color:#6E7480;">Фундамент</span></td>
-        <td>
-          Аудит источников в нише.<br>
-          Создание 3–5 экспертных материалов.<br>
-          Настройка структурированных данных.
-        </td>
-        <td style="text-align:center; color:#A63D3D; font-weight:700;">+5–10 баллов</td>
-        <td style="text-align:center;">Presence Rate ↑</td>
-      </tr>
-      <tr>
-        <td><strong>Месяц 2</strong><br><span style="color:#6E7480;">Распространение</span></td>
-        <td>
-          Публикации в 10+ авторитетных источниках.<br>
-          Работа с wiki и агрегаторами.<br>
-          Кросс-линкинг упоминаний.
-        </td>
-        <td style="text-align:center; color:#A63D3D; font-weight:700;">+8–15 баллов</td>
-        <td style="text-align:center;">Model Coverage ↑</td>
-      </tr>
-      <tr>
-        <td><strong>Месяц 3</strong><br><span style="color:#6E7480;">Закрепление</span></td>
-        <td>
-          UGC и работа с отзывами.<br>
-          Повторный аудит AI Visibility.<br>
-          Корректировка стратегии.
-        </td>
-        <td style="text-align:center; color:#A63D3D; font-weight:700;">+5–10 баллов</td>
-        <td style="text-align:center;">Score ↑</td>
-      </tr>
-    </table>
-
-    <p style="font-size:8pt; color:#6E7480; margin-top:2mm;">
-      * Прогнозы являются ориентировочными и зависят от интенсивности работ и текущей конкуренции в нише.
-    </p>
-  </div>
-
-  <!-- Методология -->
-  <div style="margin-top:8mm; page-break-inside:avoid;">
-    <p style="font-size:9.5pt; font-weight:700; margin-bottom:3mm;">Методология</p>
-    <div class="methodology">
-      <p>
-        <strong>AI Visibility Score</strong> рассчитывается по формуле:<br>
-        Score = Presence Rate × 0,50 + Model Coverage × 0,20 + Position Score × 0,15 + Sentiment Score × 0,15
-      </p>
-      <p>
-        <strong>Presence Rate</strong> — доля запросов, в ответах на которые хотя бы одна модель упомянула бренд.<br>
-        <strong>Model Coverage</strong> — доля моделей, которые упомянули бренд хотя бы в одном ответе.<br>
-        <strong>Position Score</strong> — нормированная средняя позиция упоминания (1-я позиция = 100%, 5-я = 20%).<br>
-        <strong>Sentiment Score</strong> — взвешенная тональность: позитив = 1, нейтральный = 0,5, негатив = 0.
-      </p>
-      <p>
-        Анализ проведён с использованием {{ models_total }} ИИ-ассистентов:
-        ChatGPT (gpt-4o-mini), YandexGPT Pro, GigaChat Lite, Gemini Flash,
-        Perplexity (Sonar Small), DeepSeek, Яндекс Нейро (XMLRiver API).
-        Каждая модель получила {{ prompts_count }} запросов. Итого: {{ total_queries | default(prompts_count * models_total) }} API-запросов.
-      </p>
-      <p>
-        Определение упоминаний: двухэтапный анализ — нечёткое совпадение (rapidfuzz, порог 85%)
-        + LLM-верификатор для пограничных случаев. Дата формирования отчёта: {{ report_date }}.
-      </p>
-    </div>
-  </div>
-
-  <!-- Финальный CTA -->
-  <div class="final-cta">
-    <h2>Хотите попасть в топ ИИ-выдачи?</h2>
-    <p>
-      Мы специализируемся на GEO (Generative Engine Optimization) — продвижении брендов в ответах ИИ-ассистентов.
-      Первый результат заметен уже через 30–45 дней.
-    </p>
-    <div class="final-cta-contact">
-      📬 {{ STUDIO_EMAIL | default("hello@catcore.ru") }}
-      &nbsp;&nbsp;|&nbsp;&nbsp;
-      💬 <a href="{{ CONTACT_TG_BOT_URL | default('#') }}" style="color:#fff;">
-        {{ CONTACT_TG_BOT | default("@catcore_geo") }}
-      </a>
-    </div>
-    <div style="margin-top:5mm; font-size:8.5pt; opacity:0.7;">
-      {{ STUDIO_NAME | default("Cat Core GEO Studio") }} · {{ report_date }}
-    </div>
-  </div>
 </div>

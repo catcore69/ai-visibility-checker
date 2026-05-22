@@ -1,0 +1,99 @@
+<!-- ===== СТРАНИЦА 4 ТЗ — ВАШИ ЦИФРЫ =====
+     Главная визуализация: тепловая карта 10 промптов × N моделей.
+     Под ней — 3 крупные ключевые цифры. Затем — 3 цитаты ИИ. -->
+<div class="section page-break">
+  <p class="eyebrow">04 — Ваши цифры</p>
+  <div class="section-title">Где вас видят, а где — нет</div>
+
+  <!-- Heatmap: промпты по вертикали, модели по горизонтали -->
+  <div class="heatmap-wrapper">
+    <table class="heatmap">
+      <thead>
+        <tr>
+          <th class="heatmap-prompt-col">Запрос</th>
+          {% for m in models_list %}
+          <th class="heatmap-model-col">{{ m.short_name }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in prompts_matrix %}
+        <tr>
+          <td class="heatmap-prompt">{{ row.prompt }}</td>
+          {% for cell in row.cells %}
+          <td class="heatmap-cell
+            {% if cell.mentioned and cell.position and cell.position <= 3 %}cell-green
+            {% elif cell.mentioned %}cell-yellow
+            {% else %}cell-gray{% endif %}">
+            {% if cell.mentioned and cell.position %}#{{ cell.position }}
+            {% elif cell.mentioned %}✓
+            {% elif cell.error %}!
+            {% else %}—{% endif %}
+          </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div class="heatmap-legend">
+      <span><span class="legend-sq cell-green"></span> Упомянуты на позиции 1–3</span>
+      <span><span class="legend-sq cell-yellow"></span> Упомянуты на позиции 4+</span>
+      <span><span class="legend-sq cell-gray"></span> Не упомянуты</span>
+    </div>
+  </div>
+
+  <!-- 3 крупные цифры под heatmap -->
+  <div class="big-metrics">
+    <div class="big-metric">
+      <div class="big-metric-val">{{ presence_rate }}%</div>
+      <div class="big-metric-label">Presence Rate</div>
+      <div class="big-metric-sub">упоминаний из {{ prompts_count }} запросов</div>
+    </div>
+    <div class="big-metric">
+      <div class="big-metric-val">
+        {% set positions = [] %}
+        {% for row in prompts_matrix %}
+          {% for c in row.cells %}
+            {% if c.mentioned and c.position %}{{ positions.append(c.position) or "" }}{% endif %}
+          {% endfor %}
+        {% endfor %}
+        {% if positions|length > 0 %}
+          #{{ (positions|sum / positions|length) | round(1) }}
+        {% else %}
+          —
+        {% endif %}
+      </div>
+      <div class="big-metric-label">Средняя позиция</div>
+      <div class="big-metric-sub">когда упомянуты</div>
+    </div>
+    <div class="big-metric">
+      <div class="big-metric-val">
+        {% if sentiment_breakdown and (sentiment_breakdown.positive + sentiment_breakdown.neutral + sentiment_breakdown.negative) > 0 %}
+          {{ sentiment_breakdown.positive_pct }}%
+        {% else %}—{% endif %}
+      </div>
+      <div class="big-metric-label">Позитивных</div>
+      <div class="big-metric-sub">упоминаний</div>
+    </div>
+  </div>
+
+  <!-- Реальные цитаты ИИ -->
+  {% if best_responses and best_responses|length > 0 %}
+  <h3 class="meth-h3" style="margin-top: 8mm;">Что ИИ говорит о вас (живые цитаты)</h3>
+
+  {% for resp in best_responses[:3] %}
+  <div class="chat-mockup">
+    <div class="chat-header">
+      {{ resp.model_display_name }}
+      {% if resp.brand_mentioned %}
+        <span class="chat-pill chat-pill-ok">упоминается{% if resp.position %} · #{{ resp.position }}{% endif %}</span>
+      {% else %}
+        <span class="chat-pill chat-pill-bad">не упомянуты</span>
+      {% endif %}
+    </div>
+    <div class="user-msg">{{ resp.prompt }}</div>
+    <div class="ai-msg">{{ resp.response_excerpt }}</div>
+  </div>
+  {% endfor %}
+  {% endif %}
+</div>

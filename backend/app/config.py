@@ -115,6 +115,12 @@ class Settings(BaseSettings):
     CONTACT_TG_BOT: str = "@catcore_sitebot"
     CONTACT_TG_BOT_URL: str = "https://t.me/catcore_sitebot"
 
+    # === Пакеты услуг (Этап 3 ТЗ, страница 7 PDF) ===
+    # Сейчас значения "от {price} ₽" — фаундер уточнит реальные цифры в .env.
+    PACKAGE_DORABOTKA_PRICE_FROM: str = "150 000"
+    PACKAGE_FULL_SITE_PRICE_FROM: str = "350 000"
+    PACKAGE_GROWTH_PROMISE_POINTS: int = 15  # рост Score за 90 дней
+
     # === Telegram ===
     TELEGRAM_BOT_TOKEN: str = ""
     TELEGRAM_NOTIFY_CHAT_ID: str = ""

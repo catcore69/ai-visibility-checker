@@ -258,6 +258,20 @@ async def build_and_upload_pdf(report, analysis: Analysis, competitors: list[str
     competitor_chart_b64 = _make_competitor_chart(comparison)
     sentiment_chart_b64 = _make_sentiment_pie(analysis, brand_name)
 
+    # Этап 3 ТЗ: данные для новых страниц PDF.
+    # Сборка нужных представлений из ReportView, чтобы PDF и фронт показывали
+    # одни и те же цифры (consistency).
+    from app.core.report_view import build_report_full_payload
+    view_payload = build_report_full_payload(report, analysis)
+
+    # Cover-вердикт по диапазонам ТЗ — короткая фраза, не «низкая видимость».
+    if score < 31:
+        cover_verdict = "Ваш бренд почти невидим для ИИ."
+    elif score < 61:
+        cover_verdict = "ИИ знает о вас, но рекомендует других."
+    else:
+        cover_verdict = "Вы в игре — есть куда расти."
+
     context = {
         # Основные данные
         "report": report,
@@ -266,12 +280,21 @@ async def build_and_upload_pdf(report, analysis: Analysis, competitors: list[str
         "visibility_score": score,
         "score_color": _score_color(score),
         "score_label": "Низкая" if score < 30 else "Средняя" if score < 60 else "Высокая",
+        "cover_verdict": cover_verdict,
         "report_date": datetime.now().strftime("%d.%m.%Y"),
         "niche": niche,
         "region": report.region,
         "competitors": competitors,
+        "competitors_source": report.competitors_source or "llm",  # для методологии
+        "prompts": report.prompts or [],  # список 10 промптов для методологии
         "recommendations": report.recommendations or [],
         "expert_note": report.expert_note,
+
+        # Этап 2 ТЗ — данные site_analyzer и gap_analyzer
+        "client_site_analysis": report.client_site_analysis or {},
+        "competitors_site_analysis": report.competitors_site_analysis or [],
+        "competitor_urls": report.competitor_urls or [],
+        "gap_analysis": report.gap_analysis or {},
 
         # Аналитика
         "comparison": comparison,
@@ -281,6 +304,16 @@ async def build_and_upload_pdf(report, analysis: Analysis, competitors: list[str
         "worst_prompts": worst_prompts,
         "presence_rate": report.presence_rate or 0,
         "share_of_voice": report.share_of_voice or 0,
+
+        # Данные из view_payload для синхронизации с фронтом
+        "prompts_matrix": view_payload.get("prompts_matrix", []),
+        "models_list": view_payload.get("models_list", []),
+        "best_responses": view_payload.get("best_responses", []),
+        "sentiment_breakdown": view_payload.get("sentiment_breakdown"),
+        "strong_models": view_payload.get("strong_models", []),
+        "weak_models": view_payload.get("weak_models", []),
+        "top_prompts": view_payload.get("top_prompts", []),
+        "bottom_prompts": view_payload.get("bottom_prompts", []),
 
         # Графики (base64 PNG)
         "score_components": score_components,
@@ -296,7 +329,21 @@ async def build_and_upload_pdf(report, analysis: Analysis, competitors: list[str
         "STUDIO_FULL_URL": settings.STUDIO_FULL_URL,
         "STUDIO_LOGO_URL": settings.STUDIO_LOGO_URL,
         "CONTACT_TG_BOT_URL": settings.CONTACT_TG_BOT_URL,
+        "CONTACT_TG_BOT": settings.CONTACT_TG_BOT,
         "CONTACT_EMAIL": settings.CONTACT_EMAIL,
+
+        # Этап 3 ТЗ — пакеты услуг и виджет бронирования
+        "PACKAGE_DORABOTKA_PRICE_FROM": settings.PACKAGE_DORABOTKA_PRICE_FROM,
+        "PACKAGE_FULL_SITE_PRICE_FROM": settings.PACKAGE_FULL_SITE_PRICE_FROM,
+        "PACKAGE_GROWTH_PROMISE_POINTS": settings.PACKAGE_GROWTH_PROMISE_POINTS,
+        "BOOKING_WIDGET_URL": (
+            f"{settings.STUDIO_FULL_URL}/zapis-na-razgovor"
+            f"?report_id={report.id}&utm_source=ai_report&utm_campaign=cta_call"
+        ),
+        "CHECKLIST_URL": (
+            f"{settings.STUDIO_FULL_URL}/checklist"
+            f"?report_id={report.id}&utm_source=ai_report&utm_campaign=cta_checklist"
+        ),
 
         # Статистика анализа (для шаблонов)
         "prompts_count": analysis.total_prompts,

@@ -1,84 +1,81 @@
-<!-- ===== EXECUTIVE SUMMARY ===== -->
+<!-- ===== СТРАНИЦА 2 ТЗ — EXECUTIVE SUMMARY =====
+     Три блока, каждый — короткий и фактический. Никаких «к сожалению,
+     наблюдается». Тон: «Вот цифры. Вот что это значит». -->
 <div class="section">
-  <div class="section-title">Executive Summary</div>
+  <p class="eyebrow">02 — Executive Summary</p>
+  <div class="section-title">Главное за одну страницу</div>
 
-  <div class="summary-verdict">
-    {{ verdict }}
+  <!-- Блок 1: Что проверили -->
+  <div class="exec-block">
+    <p class="exec-block-title">Что проверили</p>
+    <p class="exec-block-text">
+      Ниша: <strong>{{ niche.category | default("—") }}</strong>{% if niche.subcategory %},
+      {{ niche.subcategory }}{% endif %}. Регион: <strong>{{ region }}</strong>. Аудитория:
+      <strong>{{ niche.target_audience | default("—") }}</strong>.<br>
+      Опросили <strong>{{ models_total }}</strong> модели ИИ по
+      <strong>{{ prompts_count }}</strong> ключевым запросам вашей ниши.
+      Всего ИИ-ответов в анализе — <strong>{{ total_queries }}</strong>. Дата анализа: {{ report_date }}.
+    </p>
   </div>
 
-  <!-- Ключевые метрики -->
-  <div class="metrics-grid">
-    <div class="metric-card">
-      <div class="metric-val">{{ visibility_score }}</div>
-      <div class="metric-label">AI Visibility Score</div>
-    </div>
-    <div class="metric-card">
-      <div class="metric-val">{{ presence_rate }}%</div>
-      <div class="metric-label">Presence Rate<br>(упоминаний)</div>
-    </div>
-    <div class="metric-card">
-      <div class="metric-val">{{ models_found }}/{{ models_total }}</div>
-      <div class="metric-label">Моделей<br>упоминают вас</div>
-    </div>
-    <div class="metric-card">
-      <div class="metric-val">{{ prompts_count }}</div>
-      <div class="metric-label">Запросов<br>проверено</div>
-    </div>
+  <!-- Блок 2: Что нашли — конкретные факты с числами -->
+  <div class="exec-block">
+    <p class="exec-block-title">Что нашли</p>
+    <ul class="exec-list">
+      <li>
+        Ваш бренд упомянут в
+        <strong>{{ (presence_rate * prompts_count / 100) | round(0, "floor") | int }}</strong>
+        из {{ prompts_count }} запросов
+        ({{ presence_rate }}% Presence Rate).
+        {% if comparison and comparison|length > 1 %}
+          {% set top = comparison[0] %}
+          {% if not top.is_client %}
+            Главный конкурент — <strong>{{ top.name }}</strong> — в
+            <strong>{{ (top.presence_rate * prompts_count / 100) | round(0, "floor") | int }}</strong>
+            из {{ prompts_count }}.
+          {% endif %}
+        {% endif %}
+      </li>
+      <li>
+        Score лидера ниши:
+        {% if comparison and comparison|length > 0 %}
+          {% set leader = comparison[0] %}
+          <strong>{{ leader.score }}</strong> ({{ leader.name }}). Ваш —
+        {% else %}
+          ниже среднего по выборке. Ваш —
+        {% endif %}
+        <strong>{{ visibility_score }}</strong>.
+        Разрыв — {{ (comparison[0].score - visibility_score) if comparison|length > 0 else "—" }}
+        {% if comparison|length > 0 and comparison[0].score - visibility_score > 0 %}пунктов{% endif %}.
+      </li>
+      {% if gap_analysis and gap_analysis.key_gaps and gap_analysis.key_gaps|length > 0 %}
+      <li>
+        Главные причины разрыва (полный разбор — на странице «Почему так получается»):
+        {% for gap in gap_analysis.key_gaps[:3] %}
+          <strong>{{ gap.title }}</strong>{% if not loop.last %}; {% endif %}
+        {% endfor %}.
+      </li>
+      {% endif %}
+      {% if sentiment_breakdown and (sentiment_breakdown.positive + sentiment_breakdown.neutral + sentiment_breakdown.negative) > 0 %}
+      <li>
+        Sentiment ваших упоминаний:
+        <strong>{{ sentiment_breakdown.positive_pct }}%</strong> позитивных,
+        <strong>{{ sentiment_breakdown.neutral_pct }}%</strong> нейтральных,
+        <strong>{{ sentiment_breakdown.negative_pct }}%</strong> негативных.
+      </li>
+      {% endif %}
+    </ul>
   </div>
 
-  <!-- Краткий вывод -->
-  <p>
-    Мы проверили видимость бренда <strong>«{{ brand_name }}»</strong> в {{ models_total }} ведущих ИИ-ассистентах
-    по {{ prompts_count }} поисковым запросам в нише <em>{{ niche }}</em>.
-  </p>
-
-  {% if sov_rank %}
-  <p>
-    По показателю Share of Voice вы занимаете
-    <strong>{{ sov_rank }}-е место</strong> среди {{ competitors_count + 1 }} брендов в анализе.
-    {% if sov_rank == 1 %}
-      Это отличный результат — вы лидируете в своей нише в ИИ-поиске.
-    {% elif sov_rank <= 3 %}
-      Есть хороший задел, но конкуренты активнее работают с ИИ-контентом.
-    {% else %}
-      Ваш бренд значительно уступает конкурентам в ИИ-видимости — это точка роста.
-    {% endif %}
-  </p>
-  {% endif %}
-
-  {% if top_weakness %}
-  <p>
-    <strong>Главная точка роста:</strong> {{ top_weakness }}
-  </p>
-  {% endif %}
-
-  <!-- Сильные стороны и зоны роста -->
-  {% if strong_models or weak_models %}
-  <table style="margin-top: 6mm;">
-    <tr>
-      <th style="width:50%">✅ Сильные позиции</th>
-      <th style="width:50%">⚠️ Зоны роста</th>
-    </tr>
-    <tr>
-      <td>
-        {% if strong_models %}
-          {% for m in strong_models %}
-            <span style="color:#3BA776; font-weight:600;">{{ m }}</span>{% if not loop.last %}, {% endif %}
-          {% endfor %}
-        {% else %}
-          —
-        {% endif %}
-      </td>
-      <td>
-        {% if weak_models %}
-          {% for m in weak_models %}
-            <span style="color:#B93A3A; font-weight:600;">{{ m }}</span>{% if not loop.last %}, {% endif %}
-          {% endfor %}
-        {% else %}
-          —
-        {% endif %}
-      </td>
-    </tr>
-  </table>
-  {% endif %}
+  <!-- Блок 3: Что это значит для бизнеса — прямая практическая интерпретация -->
+  <div class="exec-block exec-block-accent">
+    <p class="exec-block-title">Что это значит для бизнеса</p>
+    <p class="exec-block-text">
+      Когда потенциальный клиент спрашивает ChatGPT, YandexGPT, Алису или ищет в Яндексе
+      с AI-блоком{% if prompts and prompts|length > 0 %} «<em>{{ prompts[0] }}</em>»{% endif %} —
+      ему называют конкурентов, а не вас. Это происходит сейчас, каждый день.
+      Точное число упущенных контактов посчитать невозможно (никто не отслеживает запросы к ИИ),
+      но порядок — десятки в день для регионального бизнеса, сотни — для федерального.
+    </p>
+  </div>
 </div>

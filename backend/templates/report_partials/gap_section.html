@@ -1,0 +1,82 @@
+<!-- ===== СТРАНИЦА 6 ТЗ — ПОЧЕМУ ТАК ПОЛУЧАЕТСЯ =====
+     Самая важная страница для конверсии. Источник данных — gap_analysis,
+     собранный из site_analyzer (Этап 2). Если анализ не прошёл — мягкая
+     заглушка, страница не пустая. -->
+<div class="section page-break">
+  <p class="eyebrow">06 — Почему так получается</p>
+  <div class="section-title">Что лидер сделал, а вы — нет</div>
+
+  {% if gap_analysis and gap_analysis.competitor_leader and gap_analysis.competitor_leader.name %}
+    {% set leader = gap_analysis.competitor_leader %}
+
+    <p class="meth-text" style="margin-bottom: 5mm;">
+      Возьмём лидера ниши — <strong>{{ leader.name }}</strong>{% if leader.url %} ({{ leader.url }}){% endif %} —
+      и разберём, чем его сайт <em>структурно</em> отличается от вашего с точки зрения
+      языковых моделей.
+    </p>
+
+    <!-- Таблица сравнения: топ-3 ключевых разрыва -->
+    {% if gap_analysis.key_gaps and gap_analysis.key_gaps|length > 0 %}
+    <table class="gap-table">
+      <thead>
+        <tr>
+          <th>Что есть у {{ leader.name }}</th>
+          <th>Что есть у вас</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for gap in gap_analysis.key_gaps %}
+        <tr>
+          <td class="gap-leader">
+            <span class="gap-check">✓</span>
+            <strong>{{ gap.title }}</strong>
+            <div class="gap-explain">{{ gap.explanation }}</div>
+          </td>
+          <td class="gap-client">
+            <span class="gap-cross">✕</span>
+            <strong>{{ gap.title }} — отсутствует</strong>
+            {% if gap.priority == "high" %}
+              <div class="gap-priority gap-priority-high">КРИТИЧНО</div>
+            {% elif gap.priority == "medium" %}
+              <div class="gap-priority gap-priority-medium">ВАЖНО</div>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <!-- Вывод-абзац -->
+    <div class="gap-conclusion">
+      <p>
+        Это не случайность. <strong>{{ leader.name }}</strong> структурно построен так,
+        чтобы языковые модели его легко цитировали. Ваш сайт сейчас этой структуры
+        не имеет — поэтому модели не выбирают вас в качестве источника ответа,
+        даже когда вы реально подходящий вариант.
+      </p>
+      <p style="margin-top: 3mm;">
+        Хорошая новость: эти разрывы закрываются. На следующей странице — конкретный
+        план, что сделать самому, что — со специалистами.
+      </p>
+    </div>
+    {% else %}
+    <p class="meth-muted">
+      Сайты конкурентов и ваш сайт по техническим параметрам близки. Главный фактор
+      отставания — не в технике, а в плотности упоминаний на внешних площадках.
+      Подробнее — на следующей странице.
+    </p>
+    {% endif %}
+
+  {% else %}
+    <!-- Fallback: site_analyzer не прошёл -->
+    <p class="meth-muted">
+      Не удалось автоматически проанализировать сайты конкурентов для подробного
+      разбора структурных отличий. Это бывает, когда сайты блокируют боты или
+      возвращают контент только через JavaScript.
+    </p>
+    <p class="meth-text" style="margin-top: 4mm;">
+      На следующей странице — общий план действий по AI Visibility, актуальный
+      для большинства бизнесов в вашей нише.
+    </p>
+  {% endif %}
+</div>
