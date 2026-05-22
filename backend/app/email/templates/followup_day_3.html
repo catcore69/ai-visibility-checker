@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>{{ brand_name }}: видели наш отчёт?</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", Arial, sans-serif; background: #F4F1EA; margin: 0; padding: 24px; color: #15171A; }
+  .container { max-width: 600px; margin: 0 auto; background: #FFFFFF; border: 1px solid #D9D5CC; border-radius: 12px; padding: 28px 32px; }
+  .p { font-size: 15px; line-height: 1.6; margin: 0 0 14px; }
+  .btn { display: inline-block; background: #A63D3D; color: #FFFFFF !important; text-decoration: none; padding: 12px 26px; border-radius: 10px; font-size: 14px; font-weight: 600; margin-top: 6px; }
+  .insight { background: #F4F1EA; border-left: 3px solid #A63D3D; padding: 12px 16px; border-radius: 6px; margin: 16px 0; font-size: 14px; line-height: 1.55; }
+  .footer { margin-top: 24px; padding-top: 16px; border-top: 1px solid #D9D5CC; font-size: 12px; color: #6E7480; }
+  .footer a { color: #6E7480; }
+</style>
+</head>
+<body>
+<div class="container">
+  <p class="p">Здравствуйте.</p>
+
+  <p class="p">
+    Хотел убедиться, что отчёт по <strong>{{ brand_name }}</strong> до вас дошёл — иногда он
+    падает в «Промоакции» или «Спам».
+  </p>
+
+  <p class="p">
+    Если уже посмотрели и появились вопросы — просто ответьте на письмо, разберёмся.
+    Если не хватило времени — отчёт открывается отсюда:
+  </p>
+
+  <a class="btn" href="{{ report_url }}">Открыть отчёт</a>
+
+  {% if key_insight %}
+  <div class="insight">
+    <strong>В одну строку:</strong> {{ key_insight }}
+  </div>
+  {% endif %}
+
+  <p class="p" style="margin-top: 20px;">
+    Если хочется разобрать ваш конкретный случай — на этой неделе ещё есть свободные слоты
+    для бесплатного 30-минутного разговора с экспертом:
+  </p>
+
+  <a class="btn" href="{{ booking_url }}">Выбрать время разговора →</a>
+
+  <p class="p" style="margin-top: 24px;">— {{ EXPERT_FIRST_NAME | default(EXPERT_NAME) }}, {{ STUDIO_NAME }}</p>
+
+  <div class="footer">
+    <a href="{{ unsubscribe_url }}">Не отправлять больше писем</a>
+  </div>
+</div>
+</body>
+</html>

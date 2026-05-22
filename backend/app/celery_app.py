@@ -43,15 +43,11 @@ celery_app.conf.beat_schedule = {
         "task": "app.tasks.generate_report.cleanup_expired_cache",
         "schedule": crontab(hour=4, minute=0),
     },
-    "send-followup-day-2": {
-        "task": "app.tasks.send_emails.send_followup_emails",
-        "schedule": crontab(hour=10, minute=0),
-        "args": [2],
-    },
-    "send-followup-day-7": {
-        "task": "app.tasks.send_emails.send_followup_emails",
-        "schedule": crontab(hour=10, minute=30),
-        "args": [7],
+    # Этап 4.2 ТЗ: новая follow-up цепочка через таблицу email_followups.
+    # Сканируем каждые 15 минут pending записи, отправляем то, что просрочено.
+    "scan-pending-followups": {
+        "task": "app.tasks.send_emails.scan_pending_followups",
+        "schedule": crontab(minute="*/15"),
     },
 }
 

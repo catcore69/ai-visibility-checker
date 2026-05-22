@@ -94,3 +94,8 @@ class Report(Base):
     utm_source = Column(String(100), nullable=True)
     utm_medium = Column(String(100), nullable=True)
     utm_campaign = Column(String(100), nullable=True)
+
+    # Этап 4.2 ТЗ: токен для unsubscribe-ссылки в follow-up письмах.
+    # Один токен на весь отчёт — отписка отменяет всю цепочку.
+    unsubscribe_token = Column(String(64), nullable=True, unique=True)
+    unsubscribed_at = Column(DateTime, nullable=True)

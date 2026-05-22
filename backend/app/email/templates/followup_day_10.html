@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>{{ brand_name }}: 1 идея, что можно сделать на этой неделе</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", Arial, sans-serif; background: #F4F1EA; margin: 0; padding: 24px; color: #15171A; }
+  .container { max-width: 600px; margin: 0 auto; background: #FFFFFF; border: 1px solid #D9D5CC; border-radius: 12px; padding: 28px 32px; }
+  .p { font-size: 15px; line-height: 1.6; margin: 0 0 14px; }
+  .btn { display: inline-block; background: #A63D3D; color: #FFFFFF !important; text-decoration: none; padding: 12px 26px; border-radius: 10px; font-size: 14px; font-weight: 600; margin-top: 6px; }
+  .idea { background: #0E0F12; color: #E6E8EC; border-radius: 10px; padding: 18px 22px; margin: 16px 0; }
+  .idea-title { color: #A63D3D; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.12em; margin: 0 0 8px; }
+  .idea-text { font-size: 15px; line-height: 1.6; margin: 0; }
+  .footer { margin-top: 24px; padding-top: 16px; border-top: 1px solid #D9D5CC; font-size: 12px; color: #6E7480; }
+  .footer a { color: #6E7480; }
+</style>
+</head>
+<body>
+<div class="container">
+  <p class="p">Здравствуйте.</p>
+
+  <p class="p">
+    Без давления и продаж — одна конкретная идея на тему AI Visibility, которая для
+    <strong>{{ brand_name }}</strong> даст быстрый результат:
+  </p>
+
+  <div class="idea">
+    <p class="idea-title">Идея на эту неделю</p>
+    <p class="idea-text">{{ idea | default("Добавить FAQ-блок на главную страницу с минимум 8 вопросами и schema.org/FAQPage-разметкой. Это самый быстрый способ попасть в цитаты ИИ-ассистентов.") }}</p>
+  </div>
+
+  <p class="p">
+    Это можно сделать своими силами за 2–3 часа. Если решитесь и появятся вопросы по реализации —
+    напишите, подскажу. Или давайте обсудим лично за 30 минут — покажу на вашем сайте, где
+    конкретно это внедрять:
+  </p>
+
+  <a class="btn" href="{{ booking_url }}">Выбрать время разговора →</a>
+
+  <p class="p" style="margin-top: 24px;">— {{ EXPERT_FIRST_NAME | default(EXPERT_NAME) }}, {{ STUDIO_NAME }}</p>
+
+  <div class="footer">
+    <a href="{{ unsubscribe_url }}">Не отправлять больше писем</a>
+  </div>
+</div>
+</body>
+</html>

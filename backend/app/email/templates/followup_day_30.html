@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>{{ brand_name }}: через месяц перепроверим?</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", Arial, sans-serif; background: #F4F1EA; margin: 0; padding: 24px; color: #15171A; }
+  .container { max-width: 600px; margin: 0 auto; background: #FFFFFF; border: 1px solid #D9D5CC; border-radius: 12px; padding: 28px 32px; }
+  .p { font-size: 15px; line-height: 1.6; margin: 0 0 14px; }
+  .btn { display: inline-block; background: #A63D3D; color: #FFFFFF !important; text-decoration: none; padding: 12px 26px; border-radius: 10px; font-size: 14px; font-weight: 600; margin: 8px 4px 0 0; }
+  .btn-secondary { display: inline-block; background: transparent; color: #A63D3D !important; text-decoration: none; padding: 12px 26px; border-radius: 10px; font-size: 14px; font-weight: 600; border: 1px solid #D9D5CC; margin: 8px 4px 0 0; }
+  .footer { margin-top: 24px; padding-top: 16px; border-top: 1px solid #D9D5CC; font-size: 12px; color: #6E7480; }
+  .footer a { color: #6E7480; }
+</style>
+</head>
+<body>
+<div class="container">
+  <p class="p">Здравствуйте.</p>
+
+  <p class="p">
+    Через 30 дней после первого замера AI Visibility обычно видна динамика — что-то меняется
+    в выдаче моделей, что-то — нет.
+  </p>
+
+  <p class="p">
+    Хотите, бесплатно перезапустим отчёт по <strong>{{ brand_name }}</strong> через месяц
+    и посмотрим, что изменилось?
+  </p>
+
+  <a class="btn" href="{{ recheck_url }}">Да, запланировать перезапуск</a>
+
+  <p class="p" style="margin-top: 22px;">
+    Или если хочется не ждать ещё месяц, а уже сейчас что-то начать делать — давайте поговорим
+    30 минут:
+  </p>
+
+  <a class="btn-secondary" href="{{ booking_url }}">Выбрать время разговора</a>
+
+  <p class="p" style="margin-top: 24px;">— {{ EXPERT_FIRST_NAME | default(EXPERT_NAME) }}, {{ STUDIO_NAME }}</p>
+
+  <div class="footer">
+    <a href="{{ unsubscribe_url }}">Не отправлять больше писем</a>
+  </div>
+</div>
+</body>
+</html>

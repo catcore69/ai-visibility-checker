@@ -377,6 +377,15 @@ async def cta_click(
     }
     await log_event(db, report_id, "cta_clicked_hot_lead", metadata=metadata)
 
+    # Этап 4.2 ТЗ: клик по CTA — горячий лид — отменяет follow-up цепочку.
+    # Триггеры отмены: call_scheduled (Bitrix24 webhook, Этап 4.4), checklist_downloaded.
+    try:
+        from app.db.repositories.followup_repo import cancel_followups_for_report
+        reason = "call_scheduled" if body.cta_type in ("call", "booking", "telegram") else "cta_clicked"
+        await cancel_followups_for_report(db, report_id, reason)
+    except Exception as exc:
+        logger.warning("followup_cancel_on_cta_failed", error=str(exc))
+
     from app.integrations.telegram import TelegramNotifier
     from app.integrations.google_sheets import GoogleSheetsCRM
     telegram = TelegramNotifier(settings.TELEGRAM_BOT_TOKEN, settings.TELEGRAM_NOTIFY_CHAT_ID)
@@ -389,6 +398,57 @@ async def cta_click(
         pass
 
     return {"received": True}
+
+
+@router.get("/report/{report_id}/unsubscribe")
+async def unsubscribe(
+    report_id: UUID,
+    token: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Этап 4.2 ТЗ: отписка от follow-up писем по ссылке из email.
+
+    Сверяем токен (защита от чужих кликов — без токена URL никто не угадает).
+    Помечаем report.unsubscribed_at + отменяем все pending follow-ups.
+    Возвращаем простую HTML-страницу с подтверждением.
+    """
+    from fastapi.responses import HTMLResponse
+
+    report = await get_report(db, report_id)
+    if not report or not token or token != (report.unsubscribe_token or ""):
+        raise HTTPException(404, "Ссылка недействительна.")
+
+    if not report.unsubscribed_at:
+        await update_report_field(db, report_id, unsubscribed_at=datetime.utcnow())
+
+    try:
+        from app.db.repositories.followup_repo import cancel_followups_for_report
+        await cancel_followups_for_report(db, report_id, "user_unsubscribed")
+    except Exception as exc:
+        logger.warning("followup_cancel_on_unsubscribe_failed", error=str(exc))
+
+    await log_event(db, report_id, "email_unsubscribed")
+
+    html = f"""<!DOCTYPE html>
+<html lang="ru"><head><meta charset="UTF-8"><title>Отписка — CatCore</title>
+<style>
+  body {{ font-family: -apple-system, "Segoe UI", Arial, sans-serif; background: #0E0F12;
+          color: #E6E8EC; margin: 0; padding: 80px 20px; text-align: center; }}
+  .card {{ max-width: 480px; margin: 0 auto; background: #1B1D22;
+           border: 1px solid #2F333B; border-radius: 16px; padding: 40px 32px; }}
+  h1 {{ font-size: 24px; margin: 0 0 16px; color: #FFFFFF; }}
+  p  {{ font-size: 15px; color: #8A8F99; line-height: 1.55; margin: 0 0 16px; }}
+  a  {{ color: #A63D3D; text-decoration: none; }}
+</style></head><body>
+  <div class="card">
+    <h1>Готово, отписали</h1>
+    <p>Больше не отправим вам ни одного письма по этому отчёту.</p>
+    <p>Если передумаете — отчёт всегда открывается здесь:<br>
+       <a href="{settings.STUDIO_FULL_URL}/otchet/{report_id}">{settings.STUDIO_FULL_URL}/otchet/{report_id}</a>
+    </p>
+  </div>
+</body></html>"""
+    return HTMLResponse(content=html, status_code=200)
 
 
 @router.post("/check/{report_id}/resend-email")
