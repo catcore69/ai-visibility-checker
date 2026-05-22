@@ -1,89 +1,107 @@
-<!-- ===== КОНКУРЕНТНЫЙ АНАЛИЗ ===== -->
+<!-- ===== СТРАНИЦА 5 ТЗ — КОНКУРЕНТЫ =====
+     Та же тепловая карта, но 5 конкурентов сверху-вниз против тех же
+     промптов. Это ключевая страница-боль. -->
 <div class="section page-break">
-  <div class="section-title">Конкурентный анализ</div>
+  <p class="eyebrow">05 — Конкуренты</p>
+  <div class="section-title">Кого ИИ называет вместо вас</div>
 
-  <p style="font-size:9pt; color:#15171A; margin-bottom:5mm;">
-    Сравнение с конкурентами по всем {{ prompts_count }} запросам и {{ models_total }} ИИ-моделям.
-    Ваш бренд выделен акцентным красным.
+  <p class="meth-text" style="margin-bottom: 5mm;">
+    Те же {{ prompts_count }} запросов, те же {{ models_total }} моделей. Только теперь
+    мы смотрим — кого упомянули конкуренты.
   </p>
 
-  <!-- Competitor bar chart -->
-  {% if competitor_chart_b64 %}
-  <div style="text-align:center; margin-bottom:7mm; page-break-inside:avoid;">
-    <img src="data:image/png;base64,{{ competitor_chart_b64 }}" alt="Competitor chart"
-         style="max-width:140mm; border-radius:8px;">
-  </div>
-  {% endif %}
+  <!-- Share of Voice bar chart -->
+  <h3 class="meth-h3">Share of Voice — кто звучит громче</h3>
+  <p class="meth-text" style="margin-bottom: 3mm;">
+    Доля упоминаний бренда в общем количестве ответов ИИ в вашей нише.
+  </p>
 
-  <!-- Сводная таблица конкурентов -->
-  <table>
-    <tr>
-      <th style="width:30%">Бренд</th>
-      <th style="width:14%; text-align:center;">Score</th>
-      <th style="width:14%; text-align:center;">Presence</th>
-      <th style="width:14%; text-align:center;">SoV</th>
-      <th style="width:14%; text-align:center;">Модели</th>
-      <th style="width:14%; text-align:center;">Сент.</th>
-    </tr>
+  <table class="sov-table">
     {% for brand in competitor_comparison %}
-    <tr {% if brand.is_client %}class="client-row"{% endif %}>
-      <td>
-        {% if brand.is_client %}⭐ {% endif %}
-        {{ brand.name }}
-        {% if brand.is_client %}<br><span style="font-size:7.5pt; color:#A63D3D; font-weight:400;">(ваш бренд)</span>{% endif %}
+    <tr {% if brand.is_client %}class="sov-client"{% endif %}>
+      <td class="sov-name">
+        {% if brand.is_client %}<span class="sov-star">★</span>{% endif %}
+        <strong>{{ brand.name }}</strong>
+        {% if brand.is_client %}<span class="sov-you">(вы)</span>{% endif %}
       </td>
-      <td style="text-align:center; font-weight:700; color:{% if brand.is_client %}#A63D3D{% else %}#15171A{% endif %};">
-        {{ brand.score }}
+      <td class="sov-bar-cell">
+        <div class="sov-bar-track">
+          <div class="sov-bar-fill {% if brand.is_client %}sov-bar-client{% endif %}"
+               style="width:{{ brand.sov | default(0) }}%;"></div>
+        </div>
       </td>
-      <td style="text-align:center;">{{ brand.presence_rate }}%</td>
-      <td style="text-align:center;">{{ brand.sov }}%</td>
-      <td style="text-align:center;">{{ brand.models_found }}/{{ models_total }}</td>
-      <td style="text-align:center;">
-        {% if brand.dominant_sentiment == 'positive' %}
-          <span class="sentiment-badge sentiment-positive">Позит.</span>
-        {% elif brand.dominant_sentiment == 'negative' %}
-          <span class="sentiment-badge sentiment-negative">Негат.</span>
-        {% else %}
-          <span class="sentiment-badge sentiment-neutral">Нейтр.</span>
-        {% endif %}
-      </td>
+      <td class="sov-pct">{{ brand.sov | default(0) }}%</td>
     </tr>
     {% endfor %}
   </table>
 
-  <!-- Где конкуренты обходят клиента -->
-  {% if worst_prompts %}
-  <div style="margin-top:8mm;">
-    <p style="font-size:10pt; font-weight:700; margin-bottom:3mm;">
-      ⚠️ Запросы, где конкуренты обходят вас
-    </p>
-    <p style="font-size:8.5pt; color:#6E7480; margin-bottom:4mm;">
-      Топ-{{ worst_prompts|length }} запросов, в которых ваши конкуренты получают упоминания, а вы — нет.
-      Это ваши приоритетные точки роста.
-    </p>
-    <table>
+  <!-- Сводная таблица: Score, Presence, SoV, Sentiment по каждому -->
+  <h3 class="meth-h3" style="margin-top: 8mm;">Полные цифры</h3>
+  <table>
+    <thead>
       <tr>
-        <th style="width:45%">Запрос к ИИ</th>
-        <th style="width:20%">Кто упоминается</th>
-        <th style="width:20%">Ваша позиция</th>
-        <th style="width:15%">Потенциал</th>
+        <th>Бренд</th>
+        <th style="text-align:center;">Score</th>
+        <th style="text-align:center;">Presence</th>
+        <th style="text-align:center;">SoV</th>
+        <th style="text-align:center;">Моделей</th>
+        <th style="text-align:center;">Sentiment</th>
       </tr>
-      {% for wp in worst_prompts %}
-      <tr>
-        <td style="font-size:8pt;">{{ wp.prompt }}</td>
+    </thead>
+    <tbody>
+      {% for brand in competitor_comparison %}
+      <tr {% if brand.is_client %}class="client-row"{% endif %}>
         <td>
-          {% for c in wp.competitors_mentioned %}
-            <span style="color:#B93A3A; font-weight:600;">{{ c }}</span>{% if not loop.last %}, {% endif %}
-          {% endfor %}
+          {% if brand.is_client %}★ {% endif %}<strong>{{ brand.name }}</strong>
+          {% if brand.is_client %}<br><span class="meth-muted">(ваш бренд)</span>{% endif %}
         </td>
-        <td style="color:#6E7480;">
-          {% if wp.client_position %}
-            #{{ wp.client_position }}
+        <td style="text-align:center;">
+          <strong style="color: {% if brand.is_client %}#A63D3D{% else %}#15171A{% endif %};">
+            {{ brand.score }}
+          </strong>
+        </td>
+        <td style="text-align:center;">{{ brand.presence_rate }}%</td>
+        <td style="text-align:center;">{{ brand.sov | default(0) }}%</td>
+        <td style="text-align:center;">{{ brand.models_found }}/{{ models_total }}</td>
+        <td style="text-align:center;">
+          {% if brand.dominant_sentiment == 'positive' %}
+            <span class="sentiment-badge sentiment-positive">Позит.</span>
+          {% elif brand.dominant_sentiment == 'negative' %}
+            <span class="sentiment-badge sentiment-negative">Негат.</span>
           {% else %}
-            не упоминается
+            <span class="sentiment-badge sentiment-neutral">Нейтр.</span>
           {% endif %}
         </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <!-- Где конкуренты обходят клиента — приоритеты роста -->
+  {% if worst_prompts %}
+  <h3 class="meth-h3" style="margin-top: 8mm;">Где конкуренты обходят вас</h3>
+  <p class="meth-text" style="margin-bottom: 4mm;">
+    Топ-{{ worst_prompts|length }} запросов, в которых ваши конкуренты получают упоминания,
+    а вы — нет. Это ваши прямые точки роста.
+  </p>
+  <table>
+    <thead>
+      <tr>
+        <th>Запрос к ИИ</th>
+        <th style="width: 32%;">Кого упоминают</th>
+        <th style="width: 16%; text-align: center;">Потенциал</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for wp in worst_prompts %}
+      <tr>
+        <td>{{ wp.prompt }}</td>
         <td>
+          {% for c in wp.competitors_mentioned %}
+            <span style="color:#A63D3D; font-weight:600;">{{ c }}</span>{% if not loop.last %}, {% endif %}
+          {% endfor %}
+        </td>
+        <td style="text-align:center;">
           {% if wp.gap_score >= 70 %}
             <span style="color:#3BA776; font-weight:700;">Высокий</span>
           {% elif wp.gap_score >= 40 %}
@@ -94,19 +112,7 @@
         </td>
       </tr>
       {% endfor %}
-    </table>
-  </div>
-  {% endif %}
-
-  <!-- Что делают лидеры по-другому -->
-  {% if sov_leader %}
-  <div style="margin-top:7mm; background:#ECE7DA; border-radius:8px; padding:5mm; page-break-inside:avoid;">
-    <p style="font-weight:700; font-size:9.5pt; margin:0 0 2mm;">
-      🏆 Что отличает лидера ниши — {{ sov_leader.name }} (SoV {{ sov_leader.sov }}%)?
-    </p>
-    <p style="font-size:8.5pt; color:#15171A; margin:0;">
-      {{ sov_leader.insight | default("Бренд активно публикует экспертный контент на авторитетных площадках, которые используются ИИ-моделями как источники. Это приводит к стабильным упоминаниям в ответах.") }}
-    </p>
-  </div>
+    </tbody>
+  </table>
   {% endif %}
 </div>
