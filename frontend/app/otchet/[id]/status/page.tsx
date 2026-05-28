@@ -30,7 +30,9 @@ export default function StatusPage() {
 
       const READY_STATUSES = ['awaiting_personal_note', 'sending_email', 'completed'];
       if (READY_STATUSES.includes(data.status) || (data as any).completed === true) {
-        router.replace(`/otchet/${reportId}`);
+        // Этап 5.3 ТЗ: после ожидания — на короткий тизер-результат (выше
+        // конверсия), оттуда ссылка на полный отчёт /otchet/{id}.
+        router.replace(`/proverka/result/${reportId}`);
         return;
       }
 

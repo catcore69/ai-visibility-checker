@@ -70,7 +70,7 @@ export default function ProverkaPage() {
       </section>
 
       {/* ===== Форма ===== */}
-      <section className="max-w-3xl mx-auto px-6 pb-20">
+      <section className="max-w-3xl mx-auto px-6 pb-8">
         <div className="card-surface p-8 shadow-card">
           <h2 className="font-heading text-2xl text-center mb-1">Введите данные вашего бренда</h2>
           <p className="text-center text-sm text-brand-muted mb-6">
@@ -79,6 +79,29 @@ export default function ProverkaPage() {
           <Suspense>
             <HeroForm />
           </Suspense>
+        </div>
+      </section>
+
+      {/* ===== Второй CTA — для тех, у кого сайта ещё нет (Этап 5.1 ТЗ) ===== */}
+      <section className="max-w-3xl mx-auto px-6 pb-20">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 rounded-2xl border border-brand-border bg-brand-surface/50 px-6 py-5">
+          <div>
+            <p className="font-heading text-base text-brand-textBright">
+              Только планируете сайт?
+            </p>
+            <p className="text-sm text-brand-muted mt-0.5">
+              Инструмент проверяет уже существующий сайт. Если сайта пока нет — расскажем,
+              как сразу собрать его под выдачу ИИ.
+            </p>
+          </div>
+          <a
+            href="https://t.me/catcore_sitebot"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn-secondary whitespace-nowrap flex-shrink-0"
+          >
+            Записаться на консультацию
+          </a>
         </div>
       </section>
 

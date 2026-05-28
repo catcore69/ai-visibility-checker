@@ -644,6 +644,73 @@ async def expert_action(
     return {"ok": True}
 
 
+@router.get("/internal/metrics", dependencies=[Depends(verify_internal_token)])
+async def funnel_metrics(
+    db: AsyncSession = Depends(get_db),
+    days: int = 90,
+) -> dict:
+    """Метрики воронки (Этап 6 ТЗ).
+
+    Агрегирует reports + lead_events за последние `days` дней в счётчики этапов
+    и конверсии. Защищено internal-токеном. Источник данных для дашборда
+    фаундера (можно дёргать из Google Sheets / Looker / руками).
+    """
+    from datetime import timedelta
+    from sqlalchemy import func, select as _select
+    from app.db.models.lead_event import LeadEvent
+
+    since = datetime.utcnow() - timedelta(days=max(1, days))
+
+    # --- Счётчики по reports ---
+    async def _count_reports(*conds) -> int:
+        stmt = _select(func.count(Report.id)).where(Report.created_at >= since, *conds)
+        return int((await db.execute(stmt)).scalar() or 0)
+
+    total = await _count_reports()
+    verified = await _count_reports(Report.email_verified_at.isnot(None))
+    completed = await _count_reports(Report.status == "completed")
+    contact_given = await _count_reports(Report.contact_given_at.isnot(None))
+    unsubscribed = await _count_reports(Report.unsubscribed_at.isnot(None))
+
+    # --- Уникальные report_id по типам событий ---
+    async def _distinct_events(event_types: list[str]) -> int:
+        stmt = _select(func.count(func.distinct(LeadEvent.report_id))).where(
+            LeadEvent.created_at >= since,
+            LeadEvent.event_type.in_(event_types),
+        )
+        return int((await db.execute(stmt)).scalar() or 0)
+
+    report_viewed = await _distinct_events(["report_viewed"])
+    pdf_downloaded = await _distinct_events(["pdf_downloaded"])
+    cta_clicked = await _distinct_events(["cta_clicked_hot_lead", "contact_given"])
+
+    def _rate(part: int, whole: int) -> float:
+        return round(part / whole * 100, 1) if whole else 0.0
+
+    return {
+        "period_days": days,
+        "funnel": {
+            "reports_total": total,
+            "email_verified": verified,
+            "report_completed": completed,
+            "report_viewed": report_viewed,
+            "pdf_downloaded": pdf_downloaded,
+            "cta_clicked": cta_clicked,
+            "contact_given": contact_given,
+            "unsubscribed": unsubscribed,
+        },
+        "conversion_rates_pct": {
+            # Из главных метрик ТЗ (часть 6).
+            "verify_rate": _rate(verified, total),
+            "complete_rate": _rate(completed, verified),
+            "pdf_download_rate": _rate(pdf_downloaded, completed),
+            "cta_click_rate": _rate(cta_clicked, completed),
+            "contact_given_rate": _rate(contact_given, completed),
+            "lead_to_contact_rate": _rate(contact_given, total),
+        },
+    }
+
+
 def _restore_analysis(data: dict) -> Analysis:
     """Восстанавливает объект Analysis из JSONB."""
     from app.core.analyzer import Analysis, MentionResult
