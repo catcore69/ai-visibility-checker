@@ -274,26 +274,11 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
             )
         else:
             await update_report_status(db, report_id, "sending_email", progress=99)
-
-            # Этап 4.2 ТЗ: гарантируем unsubscribe_token до отправки писем.
-            # Один токен на весь отчёт — отписка отменяет всю follow-up цепочку.
-            import secrets as _secrets
             report_final = await get_report(db, report_id)
-            if not report_final.unsubscribe_token:
-                await update_report_field(
-                    db, report_id,
-                    unsubscribe_token=_secrets.token_urlsafe(32),
-                )
-                report_final = await get_report(db, report_id)
 
-            await email_sender.send_report_ready(report_final)
-
-            # Этап 4.2 ТЗ: запускаем follow-up цепочку (день +3, +10, +30).
-            try:
-                from app.db.repositories.followup_repo import create_followup_chain
-                await create_followup_chain(db, report_id)
-            except Exception as fc_exc:
-                logger.error("followup_chain_create_failed", error=str(fc_exc))
+            # Этап 4.2 ТЗ: письмо + follow-up цепочка.
+            from app.core.report_delivery import finalize_report_delivery
+            await finalize_report_delivery(db, report_final)
 
             await update_report_status(db, report_id, "completed", progress=100)
             await telegram.notify_report_completed(report_final)

@@ -12,6 +12,7 @@ from app.api.v1.dependencies import get_db, get_redis, verify_internal_token
 from app.api.v1.schemas import (
     CheckRequest,
     CheckResponse,
+    ContactRequest,
     CTAClickRequest,
     ExpertActionRequest,
     ReportFull,
@@ -502,6 +503,109 @@ async def telegram_webhook(
         logger.error("telegram_webhook_handler_failed", error=repr(exc), error_type=type(exc).__name__)
         # Telegram считает любой не-200 за повтор. Отдаём 200, чтобы не зациклить.
     return {"ok": True}
+
+
+@router.post("/report/{report_id}/contact")
+async def add_contact(
+    report_id: UUID,
+    body: ContactRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Заявка на разговор с экспертом (Этап 5.2.3 ТЗ).
+
+    Заменяет виджет Bitrix24 (его нет на бесплатном тарифе). Клиент оставляет
+    имя + телефон/Telegram + удобное время + два согласия. Мы:
+    - валидируем и сохраняем контакт в reports;
+    - помечаем spam_suspect при мусорном телефоне;
+    - если не спам — шлём эксперту Telegram «🔥 Горячий лид»;
+    - отменяем follow-up цепочку (клиент уже на связи);
+    - логируем в Google Sheets.
+    Эксперт перезванивает вручную (календарного виджета нет — есть «удобное время»).
+    """
+    from app.utils.phone import is_suspicious_phone, normalize_phone
+
+    report = await get_report(db, report_id)
+    if not report:
+        raise HTTPException(404, "Отчёт не найден.")
+
+    name = (body.name or "").strip()
+    if len(name) < 2:
+        raise HTTPException(400, "Укажите имя (минимум 2 символа).")
+    if not (body.phone or body.telegram):
+        raise HTTPException(400, "Укажите телефон или Telegram.")
+    if not body.consent_personal_data:
+        raise HTTPException(400, "Требуется согласие на обработку персональных данных.")
+    if not body.consent_cross_border:
+        raise HTTPException(400, "Требуется согласие на трансграничную передачу данных.")
+
+    ip = request.headers.get("X-Real-IP") or request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or (request.client.host if request.client else "")
+
+    phone_norm = None
+    is_spam = False
+    if body.phone:
+        phone_norm, valid = normalize_phone(body.phone)
+        if not valid:
+            raise HTTPException(400, "Похоже, формат телефона неверный — проверьте, пожалуйста.")
+        is_spam = is_suspicious_phone(phone_norm)
+
+    telegram = (body.telegram or "").strip() or None
+    if telegram and not telegram.startswith("@"):
+        telegram = "@" + telegram.lstrip("@")
+
+    now = datetime.utcnow()
+    await update_report_field(
+        db,
+        report_id,
+        client_name=name,
+        client_phone=phone_norm,
+        client_telegram=telegram,
+        preferred_call_time=(body.preferred_time or "любое"),
+        contact_given_at=now,
+        contact_consent_personal_data_at=now,
+        contact_consent_cross_border_at=now,
+        contact_consent_ip=ip,
+        spam_suspect=is_spam,
+    )
+    report = await get_report(db, report_id)
+
+    await log_event(db, report_id, "contact_given", metadata={
+        "preferred_time": body.preferred_time,
+        "has_phone": bool(phone_norm),
+        "has_telegram": bool(telegram),
+        "spam_suspect": is_spam,
+    })
+
+    # Отменяем follow-up — клиент уже на связи.
+    try:
+        from app.db.repositories.followup_repo import cancel_followups_for_report
+        await cancel_followups_for_report(db, report_id, "contact_given")
+    except Exception as exc:
+        logger.warning("contact_cancel_followups_failed", error=str(exc))
+
+    # Telegram «Горячий лид» — только если не подозрение на спам.
+    if not is_spam:
+        from app.integrations.telegram import TelegramNotifier
+        telegram_notifier = TelegramNotifier(settings.TELEGRAM_BOT_TOKEN, settings.TELEGRAM_NOTIFY_CHAT_ID)
+        try:
+            await telegram_notifier.notify_hot_lead(report, {
+                "name": name,
+                "phone": phone_norm,
+                "telegram": telegram,
+                "preferred_time": body.preferred_time or "любое",
+            })
+        except Exception as exc:
+            logger.error("notify_hot_lead_failed", error=repr(exc))
+
+    # Google Sheets — фиксируем горячий лид.
+    try:
+        from app.integrations.google_sheets import GoogleSheetsCRM
+        crm = GoogleSheetsCRM(settings.GOOGLE_SHEETS_CREDENTIALS_PATH, settings.GOOGLE_SHEETS_SPREADSHEET_ID)
+        await crm.add_lead(report, "contact_given_hot_lead")
+    except Exception:
+        pass
+
+    return {"status": "ok", "spam_suspect": is_spam}
 
 
 @router.post("/internal/report/{report_id}/action", dependencies=[Depends(verify_internal_token)])

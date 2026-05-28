@@ -163,10 +163,6 @@ export default function PrivacyPage() {
               <strong>ООО «Тайм Веб» (Timeweb)</strong> — хостинг сайта, S3-хранилище для PDF-отчётов.
             </li>
             <li>
-              <strong>Bitrix24 (catcore.bitrix24.by)</strong> — CRM-учёт лидов и онлайн-запись на консультацию.
-              Используется белорусская юрисдикция Bitrix24.
-            </li>
-            <li>
               <strong>ООО «Яндекс»</strong> — YandexGPT (языковая модель) и Яндекс-поиск с AI-блоком.
               Получает только обезличенные нишевые промпты, без ПДн субъектов.
             </li>

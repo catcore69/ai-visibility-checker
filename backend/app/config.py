@@ -141,6 +141,10 @@ class Settings(BaseSettings):
     GOOGLE_SHEETS_CREDENTIALS_PATH: str = "./credentials/google_service_account.json"
     GOOGLE_SHEETS_SPREADSHEET_ID: str = ""
 
+    # Bitrix24 убран: на бесплатном тарифе нет ни REST API (вебхуки/локальные
+    # приложения недоступны), ни CRM-формы. CRM-роль выполняет Google Sheets,
+    # заявки на разговор собирает наша форма /zapis-na-razgovor → Telegram.
+
     @property
     def enabled_models_list(self) -> list[str]:
         return [m.strip() for m in self.ENABLED_MODELS.split(",") if m.strip()]
