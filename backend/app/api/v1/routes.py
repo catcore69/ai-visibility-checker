@@ -504,6 +504,111 @@ async def telegram_webhook(
     return {"ok": True}
 
 
+@router.post("/integrations/bitrix24/webhook")
+async def bitrix24_webhook(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Приёмник исходящего вебхука Bitrix24 (Этап 4.4 ТЗ).
+
+    Bitrix шлёт form-encoded POST на событие ONCRMDEALUPDATE:
+        event=ONCRMDEALUPDATE
+        data[FIELDS][ID]=<deal_id>
+        auth[application_token]=<token>
+
+    Что делаем:
+    - проверяем application_token;
+    - тянем сделку из Bitrix, читаем STAGE_ID и UF_CRM_REPORT_ID;
+    - CALL_SCHEDULED → отменяем follow-up цепочку (клиент записался);
+    - CALL_DONE → лог + (post-call follow-up — задел на будущее);
+    - зеркалим сделку в Google Sheets (одностороннe Bitrix → Sheets).
+    """
+    if not settings.BITRIX24_ENABLED:
+        return {"ok": True, "skipped": "bitrix_disabled"}
+
+    try:
+        form = await request.form()
+    except Exception:
+        form = {}
+
+    # Проверка подлинности
+    token = form.get("auth[application_token]") or ""
+    if settings.BITRIX24_APP_TOKEN and token != settings.BITRIX24_APP_TOKEN:
+        raise HTTPException(403, "Invalid Bitrix24 application token")
+
+    event = form.get("event", "")
+    deal_id = form.get("data[FIELDS][ID]") or form.get("data[FIELDS][ id ]")
+    if event != "ONCRMDEALUPDATE" or not deal_id:
+        return {"ok": True, "ignored": event}
+
+    from app.integrations.bitrix24 import (
+        Bitrix24Client,
+        F_REPORT_ID,
+        F_CALL_OUTCOME,
+        STAGE_CALL_SCHEDULED,
+        STAGE_CALL_DONE,
+    )
+    client = Bitrix24Client()
+
+    # Тянем сделку целиком
+    deal = await client._call("crm.deal.get", {"id": deal_id})
+    if not deal:
+        return {"ok": True, "deal_not_found": deal_id}
+
+    report_id_raw = deal.get(F_REPORT_ID)
+    stage = deal.get("STAGE_ID", "")
+
+    # Реакция на смену стадии
+    if report_id_raw:
+        try:
+            rid = UUID(str(report_id_raw))
+        except (ValueError, TypeError):
+            rid = None
+
+        if rid:
+            if stage == STAGE_CALL_SCHEDULED:
+                # Клиент записался на разговор — глушим email-цепочку.
+                try:
+                    from app.db.repositories.followup_repo import cancel_followups_for_report
+                    await cancel_followups_for_report(db, rid, "call_scheduled")
+                except Exception as exc:
+                    logger.warning("bitrix_webhook_cancel_followups_failed", error=str(exc))
+                await log_event(db, rid, "bitrix_call_scheduled")
+            elif stage == STAGE_CALL_DONE:
+                await log_event(db, rid, "bitrix_call_done")
+
+    # Зеркало в Google Sheets
+    try:
+        from app.integrations.google_sheets import GoogleSheetsCRM
+        crm = GoogleSheetsCRM(
+            settings.GOOGLE_SHEETS_CREDENTIALS_PATH,
+            settings.GOOGLE_SHEETS_SPREADSHEET_ID,
+        )
+        phone = ""
+        if isinstance(deal.get("PHONE"), list) and deal["PHONE"]:
+            phone = deal["PHONE"][0].get("VALUE", "")
+        await crm.upsert_deal_row({
+            "report_id": report_id_raw or "",
+            "deal_id": deal_id,
+            "stage": stage,
+            "brand_name": deal.get("TITLE", "").replace("AI Visibility: ", ""),
+            "url": deal.get("UF_CRM_URL", ""),
+            "niche": deal.get("UF_CRM_NICHE", ""),
+            "region": deal.get("UF_CRM_REGION", ""),
+            "score": deal.get("UF_CRM_SCORE", ""),
+            "top_competitor": deal.get("UF_CRM_TOP_COMPETITOR", ""),
+            "competitors_source": deal.get("UF_CRM_COMPETITORS_SOURCE", ""),
+            "hot_lead_score": deal.get("UF_CRM_HOT_LEAD_SCORE", ""),
+            "email": "",
+            "phone": phone,
+            "call_outcome": deal.get(F_CALL_OUTCOME, ""),
+        })
+    except Exception as exc:
+        logger.warning("bitrix_webhook_sheets_mirror_failed", error=str(exc))
+
+    return {"ok": True}
+
+
 @router.post("/internal/report/{report_id}/action", dependencies=[Depends(verify_internal_token)])
 async def expert_action(
     report_id: UUID,

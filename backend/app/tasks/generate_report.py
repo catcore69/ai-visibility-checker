@@ -65,9 +65,10 @@ def auto_send_report_after_timeout(report_id: str) -> None:
                 if report.status != "awaiting_personal_note":
                     return
 
-                email_sender = EmailSender(settings)
                 await update_report_status(db, UUID(report_id), "sending_email", progress=99)
-                await email_sender.send_report_ready(report)
+                # Этапы 4.2 + 4.4 ТЗ: письмо + follow-up цепочка + сделка Bitrix24.
+                from app.core.report_delivery import finalize_report_delivery
+                await finalize_report_delivery(db, report)
                 await update_report_status(db, UUID(report_id), "completed", progress=100)
 
                 telegram = TelegramNotifier(settings.TELEGRAM_BOT_TOKEN, settings.TELEGRAM_NOTIFY_CHAT_ID)
