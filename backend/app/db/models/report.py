@@ -99,3 +99,15 @@ class Report(Base):
     # Один токен на весь отчёт — отписка отменяет всю цепочку.
     unsubscribe_token = Column(String(64), nullable=True, unique=True)
     unsubscribed_at = Column(DateTime, nullable=True)
+
+    # Этап 5.2.3 ТЗ: заявка на разговор с экспертом (горячий лид).
+    client_name = Column(String(200), nullable=True)
+    client_phone = Column(String(32), nullable=True)
+    client_telegram = Column(String(100), nullable=True)
+    preferred_call_time = Column(String(20), nullable=True)  # утро/день/вечер/любое
+    contact_given_at = Column(DateTime, nullable=True)
+    contact_consent_personal_data_at = Column(DateTime, nullable=True)
+    contact_consent_cross_border_at = Column(DateTime, nullable=True)
+    contact_consent_ip = Column(String(45), nullable=True)
+    spam_suspect = Column(Boolean, default=False, nullable=False)
+    contact_dismissed_at = Column(DateTime, nullable=True)

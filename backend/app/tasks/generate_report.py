@@ -66,7 +66,7 @@ def auto_send_report_after_timeout(report_id: str) -> None:
                     return
 
                 await update_report_status(db, UUID(report_id), "sending_email", progress=99)
-                # Этапы 4.2 + 4.4 ТЗ: письмо + follow-up цепочка + сделка Bitrix24.
+                # Этап 4.2 ТЗ: письмо + follow-up цепочка.
                 from app.core.report_delivery import finalize_report_delivery
                 await finalize_report_delivery(db, report)
                 await update_report_status(db, UUID(report_id), "completed", progress=100)

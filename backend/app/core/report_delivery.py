@@ -1,4 +1,4 @@
-"""Единая точка «отчёт отправлен клиенту» (Этапы 4.2 + 4.4 ТЗ).
+"""Единая точка «отчёт отправлен клиенту» (Этап 4.2 ТЗ).
 
 Отчёт может уходить клиенту из четырёх мест:
 - pipeline.py (авто-отправка, если EXPERT_REVIEW_BEFORE_SEND=false);
@@ -10,8 +10,11 @@
 1) гарантировался unsubscribe_token,
 2) отправлялось письмо,
 3) запускалась follow-up цепочка,
-4) создавалась сделка в Bitrix24,
 — выносим это в один хелпер.
+
+Примечание: Bitrix24 убран из проекта — на бесплатном тарифе у него нет ни
+API, ни виджета записи. CRM-роль выполняет Google Sheets + наша БД, заявки
+на разговор собирает наша форма (см. /api/v1/report/{id}/contact).
 """
 
 import secrets
@@ -24,10 +27,10 @@ logger = get_logger(__name__)
 
 
 async def finalize_report_delivery(db: AsyncSession, report) -> bool:
-    """Отправляет отчёт клиенту + follow-up цепочка + сделка Bitrix24.
+    """Отправляет отчёт клиенту + запускает follow-up цепочку.
 
-    Возвращает True, если письмо ушло. Side-effects (followup, Bitrix)
-    не влияют на возвращаемое значение — они best-effort.
+    Возвращает True, если письмо ушло. Side-effect (followup-цепочка)
+    не влияет на возвращаемое значение — он best-effort.
 
     Вызывать ПОСЛЕ того, как report.expert_note (если есть) уже сохранён.
     Статусы (sending_email / completed) выставляет вызывающий код —
@@ -55,13 +58,5 @@ async def finalize_report_delivery(db: AsyncSession, report) -> bool:
         await create_followup_chain(db, report.id)
     except Exception as exc:
         logger.error("finalize_followup_chain_failed", report_id=str(report.id), error=str(exc))
-
-    # 4. Сделка в Bitrix24 (стадия NEW)
-    try:
-        from app.integrations.bitrix24 import Bitrix24Client, STAGE_NEW
-        bx = Bitrix24Client()
-        await bx.upsert_deal(report, stage=STAGE_NEW)
-    except Exception as exc:
-        logger.error("finalize_bitrix_deal_failed", report_id=str(report.id), error=str(exc))
 
     return sent

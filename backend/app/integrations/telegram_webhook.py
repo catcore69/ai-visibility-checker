@@ -132,7 +132,7 @@ async def _action_send_as_is(db: AsyncSession, report: Report) -> str:
     telegram = TelegramNotifier(settings.TELEGRAM_BOT_TOKEN, settings.TELEGRAM_NOTIFY_CHAT_ID)
 
     await update_report_status(db, report.id, "sending_email", progress=99)
-    # Этапы 4.2 + 4.4 ТЗ: письмо + follow-up цепочка + сделка Bitrix24.
+    # Этап 4.2 ТЗ: письмо + follow-up цепочка.
     from app.core.report_delivery import finalize_report_delivery
     await finalize_report_delivery(db, report)
     await update_report_status(db, report.id, "completed", progress=100)
@@ -161,7 +161,7 @@ async def _action_add_note(db: AsyncSession, report: Report, note: str) -> str:
     await update_report_field(db, report.id, expert_note=note)
     report.expert_note = note
     await update_report_status(db, report.id, "sending_email", progress=99)
-    # Этапы 4.2 + 4.4 ТЗ: письмо + follow-up цепочка + сделка Bitrix24.
+    # Этап 4.2 ТЗ: письмо + follow-up цепочка.
     from app.core.report_delivery import finalize_report_delivery
     await finalize_report_delivery(db, report)
     await update_report_status(db, report.id, "completed", progress=100)

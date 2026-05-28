@@ -12,6 +12,7 @@ from app.api.v1.dependencies import get_db, get_redis, verify_internal_token
 from app.api.v1.schemas import (
     CheckRequest,
     CheckResponse,
+    ContactRequest,
     CTAClickRequest,
     ExpertActionRequest,
     ReportFull,
@@ -504,109 +505,107 @@ async def telegram_webhook(
     return {"ok": True}
 
 
-@router.post("/integrations/bitrix24/webhook")
-async def bitrix24_webhook(
+@router.post("/report/{report_id}/contact")
+async def add_contact(
+    report_id: UUID,
+    body: ContactRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Приёмник исходящего вебхука Bitrix24 (Этап 4.4 ТЗ).
+    """Заявка на разговор с экспертом (Этап 5.2.3 ТЗ).
 
-    Bitrix шлёт form-encoded POST на событие ONCRMDEALUPDATE:
-        event=ONCRMDEALUPDATE
-        data[FIELDS][ID]=<deal_id>
-        auth[application_token]=<token>
-
-    Что делаем:
-    - проверяем application_token;
-    - тянем сделку из Bitrix, читаем STAGE_ID и UF_CRM_REPORT_ID;
-    - CALL_SCHEDULED → отменяем follow-up цепочку (клиент записался);
-    - CALL_DONE → лог + (post-call follow-up — задел на будущее);
-    - зеркалим сделку в Google Sheets (одностороннe Bitrix → Sheets).
+    Заменяет виджет Bitrix24 (его нет на бесплатном тарифе). Клиент оставляет
+    имя + телефон/Telegram + удобное время + два согласия. Мы:
+    - валидируем и сохраняем контакт в reports;
+    - помечаем spam_suspect при мусорном телефоне;
+    - если не спам — шлём эксперту Telegram «🔥 Горячий лид»;
+    - отменяем follow-up цепочку (клиент уже на связи);
+    - логируем в Google Sheets.
+    Эксперт перезванивает вручную (календарного виджета нет — есть «удобное время»).
     """
-    if not settings.BITRIX24_ENABLED:
-        return {"ok": True, "skipped": "bitrix_disabled"}
+    from app.utils.phone import is_suspicious_phone, normalize_phone
 
-    try:
-        form = await request.form()
-    except Exception:
-        form = {}
+    report = await get_report(db, report_id)
+    if not report:
+        raise HTTPException(404, "Отчёт не найден.")
 
-    # Проверка подлинности
-    token = form.get("auth[application_token]") or ""
-    if settings.BITRIX24_APP_TOKEN and token != settings.BITRIX24_APP_TOKEN:
-        raise HTTPException(403, "Invalid Bitrix24 application token")
+    name = (body.name or "").strip()
+    if len(name) < 2:
+        raise HTTPException(400, "Укажите имя (минимум 2 символа).")
+    if not (body.phone or body.telegram):
+        raise HTTPException(400, "Укажите телефон или Telegram.")
+    if not body.consent_personal_data:
+        raise HTTPException(400, "Требуется согласие на обработку персональных данных.")
+    if not body.consent_cross_border:
+        raise HTTPException(400, "Требуется согласие на трансграничную передачу данных.")
 
-    event = form.get("event", "")
-    deal_id = form.get("data[FIELDS][ID]") or form.get("data[FIELDS][ id ]")
-    if event != "ONCRMDEALUPDATE" or not deal_id:
-        return {"ok": True, "ignored": event}
+    ip = request.headers.get("X-Real-IP") or request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or (request.client.host if request.client else "")
 
-    from app.integrations.bitrix24 import (
-        Bitrix24Client,
-        F_REPORT_ID,
-        F_CALL_OUTCOME,
-        STAGE_CALL_SCHEDULED,
-        STAGE_CALL_DONE,
+    phone_norm = None
+    is_spam = False
+    if body.phone:
+        phone_norm, valid = normalize_phone(body.phone)
+        if not valid:
+            raise HTTPException(400, "Похоже, формат телефона неверный — проверьте, пожалуйста.")
+        is_spam = is_suspicious_phone(phone_norm)
+
+    telegram = (body.telegram or "").strip() or None
+    if telegram and not telegram.startswith("@"):
+        telegram = "@" + telegram.lstrip("@")
+
+    now = datetime.utcnow()
+    await update_report_field(
+        db,
+        report_id,
+        client_name=name,
+        client_phone=phone_norm,
+        client_telegram=telegram,
+        preferred_call_time=(body.preferred_time or "любое"),
+        contact_given_at=now,
+        contact_consent_personal_data_at=now,
+        contact_consent_cross_border_at=now,
+        contact_consent_ip=ip,
+        spam_suspect=is_spam,
     )
-    client = Bitrix24Client()
+    report = await get_report(db, report_id)
 
-    # Тянем сделку целиком
-    deal = await client._call("crm.deal.get", {"id": deal_id})
-    if not deal:
-        return {"ok": True, "deal_not_found": deal_id}
+    await log_event(db, report_id, "contact_given", metadata={
+        "preferred_time": body.preferred_time,
+        "has_phone": bool(phone_norm),
+        "has_telegram": bool(telegram),
+        "spam_suspect": is_spam,
+    })
 
-    report_id_raw = deal.get(F_REPORT_ID)
-    stage = deal.get("STAGE_ID", "")
+    # Отменяем follow-up — клиент уже на связи.
+    try:
+        from app.db.repositories.followup_repo import cancel_followups_for_report
+        await cancel_followups_for_report(db, report_id, "contact_given")
+    except Exception as exc:
+        logger.warning("contact_cancel_followups_failed", error=str(exc))
 
-    # Реакция на смену стадии
-    if report_id_raw:
+    # Telegram «Горячий лид» — только если не подозрение на спам.
+    if not is_spam:
+        from app.integrations.telegram import TelegramNotifier
+        telegram_notifier = TelegramNotifier(settings.TELEGRAM_BOT_TOKEN, settings.TELEGRAM_NOTIFY_CHAT_ID)
         try:
-            rid = UUID(str(report_id_raw))
-        except (ValueError, TypeError):
-            rid = None
+            await telegram_notifier.notify_hot_lead(report, {
+                "name": name,
+                "phone": phone_norm,
+                "telegram": telegram,
+                "preferred_time": body.preferred_time or "любое",
+            })
+        except Exception as exc:
+            logger.error("notify_hot_lead_failed", error=repr(exc))
 
-        if rid:
-            if stage == STAGE_CALL_SCHEDULED:
-                # Клиент записался на разговор — глушим email-цепочку.
-                try:
-                    from app.db.repositories.followup_repo import cancel_followups_for_report
-                    await cancel_followups_for_report(db, rid, "call_scheduled")
-                except Exception as exc:
-                    logger.warning("bitrix_webhook_cancel_followups_failed", error=str(exc))
-                await log_event(db, rid, "bitrix_call_scheduled")
-            elif stage == STAGE_CALL_DONE:
-                await log_event(db, rid, "bitrix_call_done")
-
-    # Зеркало в Google Sheets
+    # Google Sheets — фиксируем горячий лид.
     try:
         from app.integrations.google_sheets import GoogleSheetsCRM
-        crm = GoogleSheetsCRM(
-            settings.GOOGLE_SHEETS_CREDENTIALS_PATH,
-            settings.GOOGLE_SHEETS_SPREADSHEET_ID,
-        )
-        phone = ""
-        if isinstance(deal.get("PHONE"), list) and deal["PHONE"]:
-            phone = deal["PHONE"][0].get("VALUE", "")
-        await crm.upsert_deal_row({
-            "report_id": report_id_raw or "",
-            "deal_id": deal_id,
-            "stage": stage,
-            "brand_name": deal.get("TITLE", "").replace("AI Visibility: ", ""),
-            "url": deal.get("UF_CRM_URL", ""),
-            "niche": deal.get("UF_CRM_NICHE", ""),
-            "region": deal.get("UF_CRM_REGION", ""),
-            "score": deal.get("UF_CRM_SCORE", ""),
-            "top_competitor": deal.get("UF_CRM_TOP_COMPETITOR", ""),
-            "competitors_source": deal.get("UF_CRM_COMPETITORS_SOURCE", ""),
-            "hot_lead_score": deal.get("UF_CRM_HOT_LEAD_SCORE", ""),
-            "email": "",
-            "phone": phone,
-            "call_outcome": deal.get(F_CALL_OUTCOME, ""),
-        })
-    except Exception as exc:
-        logger.warning("bitrix_webhook_sheets_mirror_failed", error=str(exc))
+        crm = GoogleSheetsCRM(settings.GOOGLE_SHEETS_CREDENTIALS_PATH, settings.GOOGLE_SHEETS_SPREADSHEET_ID)
+        await crm.add_lead(report, "contact_given_hot_lead")
+    except Exception:
+        pass
 
-    return {"ok": True}
+    return {"status": "ok", "spam_suspect": is_spam}
 
 
 @router.post("/internal/report/{report_id}/action", dependencies=[Depends(verify_internal_token)])

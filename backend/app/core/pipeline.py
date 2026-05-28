@@ -276,7 +276,7 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
             await update_report_status(db, report_id, "sending_email", progress=99)
             report_final = await get_report(db, report_id)
 
-            # Этапы 4.2 + 4.4 ТЗ: письмо + follow-up цепочка + сделка Bitrix24.
+            # Этап 4.2 ТЗ: письмо + follow-up цепочка.
             from app.core.report_delivery import finalize_report_delivery
             await finalize_report_delivery(db, report_final)
 

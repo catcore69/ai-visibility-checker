@@ -2,7 +2,22 @@ from datetime import datetime
 from typing import Any, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field, HttpUrl, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
+
+
+class ContactRequest(BaseModel):
+    """Заявка на разговор с экспертом (Этап 5.2.3 ТЗ).
+
+    Заполняется на странице ожидания / странице записи. Обязательны: имя,
+    хотя бы один контакт (phone/telegram), оба согласия. Валидация деталей —
+    в routes.add_contact (телефон, антиспам).
+    """
+    name: str
+    phone: Optional[str] = None
+    telegram: Optional[str] = None
+    preferred_time: Optional[str] = None  # "утро" / "день" / "вечер" / "любое"
+    consent_personal_data: bool = False
+    consent_cross_border: bool = False
 
 
 class CheckRequest(BaseModel):

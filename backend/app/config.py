@@ -141,18 +141,9 @@ class Settings(BaseSettings):
     GOOGLE_SHEETS_CREDENTIALS_PATH: str = "./credentials/google_service_account.json"
     GOOGLE_SHEETS_SPREADSHEET_ID: str = ""
 
-    # === Bitrix24 (Этап 4.4 ТЗ) ===
-    # Главный выключатель — если выключено, весь Bitrix-код становится no-op.
-    BITRIX24_ENABLED: bool = False
-    # Входящий вебхук (мы → Bitrix), формат:
-    # https://catcore.bitrix24.by/rest/1/abcdef.../
-    BITRIX24_WEBHOOK_URL: str = ""
-    # Application token исходящего вебхука (Bitrix → мы) — для проверки запросов.
-    BITRIX24_APP_TOKEN: str = ""
-    # ID воронки (категории сделок). Дефолтная воронка = "0".
-    BITRIX24_CATEGORY_ID: str = "0"
-    # URL виджета онлайн-записи (для страницы /zapis-na-razgovor).
-    BITRIX24_BOOKING_WIDGET_URL: str = ""
+    # Bitrix24 убран: на бесплатном тарифе нет ни REST API (вебхуки/локальные
+    # приложения недоступны), ни CRM-формы. CRM-роль выполняет Google Sheets,
+    # заявки на разговор собирает наша форма /zapis-na-razgovor → Telegram.
 
     @property
     def enabled_models_list(self) -> list[str]:

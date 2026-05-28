@@ -179,6 +179,23 @@ export async function trackCta(reportId: string, action: string): Promise<void> 
   await api.post(`/report/${reportId}/cta`, { action });
 }
 
+export interface ContactPayload {
+  name: string;
+  phone?: string;
+  telegram?: string;
+  preferred_time?: string;
+  consent_personal_data: boolean;
+  consent_cross_border: boolean;
+}
+
+export async function addContact(
+  reportId: string,
+  payload: ContactPayload,
+): Promise<{ status: string; spam_suspect: boolean }> {
+  const { data } = await api.post(`/report/${reportId}/contact`, payload);
+  return data;
+}
+
 export async function resendEmail(reportId: string): Promise<void> {
   await api.post(`/check/${reportId}/resend-email`);
 }
