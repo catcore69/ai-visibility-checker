@@ -139,6 +139,48 @@ async def _find_competitors_via_llm(
         return []
 
 
+def _looks_like_url(s: str) -> bool:
+    """Грубо: строка похожа на ссылку/домен (есть точка и доменная зона)."""
+    s = s.strip().lower()
+    if " " in s:
+        return False
+    return bool(re.match(r"^(https?://)?([a-z0-9\-]+\.)+[a-z]{2,}", s))
+
+
+def _normalize_client_competitors(entries: Optional[list[str]], brand_name: str) -> list[str]:
+    """Задача 5.2: клиент вводит ССЫЛКИ (или названия), по одной на строку.
+
+    - URL → имя бренда из домена (buspartner.by → «Buspartner»).
+    - Агрегаторы/соцсети/справочники — отбрасываем.
+    - Сам сайт клиента и дубли — убираем. До 5 штук.
+    """
+    from app.utils.url_normalizer import extract_brand_from_url
+
+    out: list[str] = []
+    seen: set[str] = set()
+    brand_l = (brand_name or "").strip().lower()
+    for raw in entries or []:
+        s = (raw or "").strip()
+        if not s:
+            continue
+        if _looks_like_url(s):
+            url = s if s.startswith("http") else f"http://{s}"
+            host = _domain_of(url)
+            if not host or _is_blacklisted_host(host):
+                continue  # справочник/соцсеть — не конкурент
+            name = extract_brand_from_url(url)
+        else:
+            name = s
+        key = name.lower()
+        if not name or key in seen or key == brand_l:
+            continue
+        seen.add(key)
+        out.append(name)
+        if len(out) >= 5:
+            break
+    return out
+
+
 def _merge_dedupe(client_list: list[str], llm_list: list[str], target: int) -> list[str]:
     """Объединяет два списка с приоритетом client_list, без дубликатов (без учёта регистра)."""
     seen: set[str] = set()
@@ -302,7 +344,8 @@ async def find_competitors(
        региональных/нишевых бизнесов это критично: модель не знает локальных игроков.
     3. LLM «из головы» — только если SERP ничего не дал. Помечаем low-confidence.
     """
-    client_list = [c for c in (client_competitors or []) if c and c != brand_name][:count]
+    # Задача 5.2: клиент вводит ссылки/названия — нормализуем (URL → имя, фильтр агрегаторов).
+    client_list = _normalize_client_competitors(client_competitors, brand_name)[:count]
 
     # Приоритет 1/«mixed»: клиент указал ≥3.
     if len(client_list) >= 3:

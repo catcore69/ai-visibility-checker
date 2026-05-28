@@ -68,15 +68,57 @@
     {% endif %}
 
   {% else %}
-    <!-- Fallback: site_analyzer не прошёл -->
-    <p class="meth-muted">
-      Не удалось автоматически проанализировать сайты конкурентов для подробного
-      разбора структурных отличий. Это бывает, когда сайты блокируют боты или
-      возвращают контент только через JavaScript.
+    <!-- Fallback (Задача 6.4): нет данных лидера — даём общий GEO-чеклист,
+         страница НЕ пустая. Если есть анализ сайта клиента — показываем, чего
+         не хватает именно ему. -->
+    <p class="meth-text" style="margin-bottom: 5mm;">
+      Вот что языковые модели «любят» в сайте при выборе источника для ответа.
+      {% if client_site_analysis and client_site_analysis.fetched %}
+        Отмечено, чего пока нет на вашем сайте:
+      {% else %}
+        Базовый чек-лист готовности к цитированию ИИ:
+      {% endif %}
     </p>
-    <p class="meth-text" style="margin-top: 4mm;">
-      На следующей странице — общий план действий по AI Visibility, актуальный
-      для большинства бизнесов в вашей нише.
-    </p>
+
+    {% set checklist = [
+      ("Файл /llms.txt в корне сайта", "has_llms_txt", "Инструкция для языковых моделей о вашем бизнесе. Мало у кого есть — лёгкое преимущество."),
+      ("FAQ со schema.org/FAQPage", "has_faq_schema", "Структурированные вопросы-ответы — топливо для прямых ответов ИИ."),
+      ("Разметка организации (schema.org/Organization)", "has_organization_schema", "ИИ считывает факты о компании: название, регион, специализацию."),
+      ("Чёткая иерархия заголовков h1→h2→h3", "structured_headings", "Модели режут страницу на смысловые блоки по заголовкам."),
+      ("Страница «О компании»", "about_page_present", "Главный источник фактов о бренде для ИИ."),
+      ("Сигналы экспертизы (опыт, лицензии, команда)", "expertise_signals", "ИИ избегает рекомендовать бренды без подтверждённой экспертизы.")
+    ] %}
+
+    <table class="gap-table">
+      <thead>
+        <tr><th>Что важно для ИИ-цитирования</th><th>Есть у вас?</th></tr>
+      </thead>
+      <tbody>
+        {% for title, key, explain in checklist %}
+        {% set present = client_site_analysis and client_site_analysis.fetched and (client_site_analysis[key] if key != 'expertise_signals' else (client_site_analysis.expertise_signals or 0) >= 3) %}
+        <tr>
+          <td class="gap-leader">
+            <span class="gap-check">✓</span>
+            <strong>{{ title }}</strong>
+            <div class="gap-explain">{{ explain }}</div>
+          </td>
+          <td class="{{ 'gap-leader' if present else 'gap-client' }}">
+            {% if present %}
+              <span class="gap-check">✓</span> Есть
+            {% else %}
+              <span class="gap-cross">✕</span> Нет
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <div class="gap-conclusion">
+      <p>
+        Чем больше пунктов закрыто — тем охотнее ИИ-ассистенты цитируют ваш сайт.
+        На следующей странице — конкретный план: что сделать самому, а что — со специалистами.
+      </p>
+    </div>
   {% endif %}
 </div>

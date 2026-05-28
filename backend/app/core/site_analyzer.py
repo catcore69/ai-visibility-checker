@@ -222,19 +222,30 @@ async def analyze_site(url: str) -> dict:
 
     try:
         async with httpx.AsyncClient(
-            timeout=15.0,
+            timeout=20.0,
             follow_redirects=True,
-            headers={"User-Agent": USER_AGENT},
+            headers={
+                "User-Agent": USER_AGENT,
+                # Близко к настоящему браузеру — часть сайтов режет «голые» запросы.
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "ru,en;q=0.9",
+            },
         ) as client:
-            # Главная страница
-            try:
-                main_resp = await client.get(url)
-            except Exception as exc:
-                logger.warning("site_analyzer_fetch_main_error", url=url, error=str(exc))
-                return _empty_result(url, f"fetch_error: {type(exc).__name__}")
+            # Главная страница — с ретраем (Задача 6.4: сайты иногда отвечают со 2-й попытки).
+            main_resp = None
+            for attempt in range(2):
+                try:
+                    main_resp = await client.get(url)
+                    break
+                except Exception as exc:
+                    logger.warning("site_analyzer_fetch_attempt", url=url, attempt=attempt, error=str(exc))
+                    if attempt == 1:
+                        return _empty_result(url, f"fetch_error: {type(exc).__name__}")
+                    await asyncio.sleep(1.0)
 
-            if main_resp.status_code >= 400 or not main_resp.text:
-                return _empty_result(url, f"http_{main_resp.status_code}")
+            if main_resp is None or main_resp.status_code >= 400 or not main_resp.text:
+                code = main_resp.status_code if main_resp is not None else "none"
+                return _empty_result(url, f"http_{code}")
 
             # Параллельные служебные запросы
             llms_task = _check_exists(client, base, "/llms.txt")

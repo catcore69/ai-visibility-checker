@@ -72,9 +72,9 @@ export default function ProverkaPage() {
       {/* ===== Форма ===== */}
       <section className="max-w-3xl mx-auto px-6 pb-8">
         <div className="card-surface p-8 shadow-card">
-          <h2 className="font-heading text-2xl text-center mb-1">Введите данные вашего бренда</h2>
+          <h2 className="font-heading text-2xl text-center mb-1">Проверьте свой сайт</h2>
           <p className="text-center text-sm text-brand-muted mb-6">
-            Заполните 4 поля — за 3–7 минут получите отчёт на e-mail
+            Только адрес сайта и email — остальное определим сами. Отчёт за 3–7 минут.
           </p>
           <Suspense>
             <HeroForm />
