@@ -101,6 +101,13 @@ class TelegramNotifier:
         site_ok = bool(getattr(report, "client_site_analysis", None) and report.client_site_analysis.get("fetched"))
         site_flag = "🟢 проанализирован" if site_ok else "🟡 не удалось"
 
+        # Флаг качества конкурентов (срочный фикс 3.3)
+        quality_low = getattr(report, "competitor_quality_low", False)
+        quality_line = (
+            "\n🔴 <b>Мало релевантных конкурентов</b> — проверь вручную, попроси клиента указать своих!"
+            if quality_low else ""
+        )
+
         # Hot/warm/cold классификация
         has_phone_or_tg = bool(
             getattr(report, "client_phone", None) or getattr(report, "client_telegram", None)
@@ -130,7 +137,8 @@ class TelegramNotifier:
             f"<b>Quality flags:</b>\n"
             f"{cs_flag} — источник конкурентов\n"
             f"{site_flag} — анализ сайта\n"
-            f"Признак лида: <b>{temperature}</b>\n\n"
+            f"Признак лида: <b>{temperature}</b>"
+            f"{quality_line}\n\n"
             f"⏰ Авто-отправка через {settings.EXPERT_REVIEW_TIMEOUT_MINUTES} минут.\n"
             f"🔗 https://catcore.ru/otchet/{report.id}",
             keyboard=keyboard,

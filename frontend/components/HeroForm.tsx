@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import { submitCheck, type CheckPayload } from '@/lib/api';
@@ -19,6 +19,8 @@ declare global {
 /** Regex для предварительной валидации URL на клиенте. */
 const URL_RE = /^(https?:\/\/)?([a-z0-9-]+\.)+[a-z]{2,}(:\d+)?(\/.*)?$/i;
 
+const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || '';
+
 export default function HeroForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -31,9 +33,40 @@ export default function HeroForm() {
   const [hpName, setHpName] = useState(''); // honeypot
   const [consentPersonal, setConsentPersonal] = useState(false);
   const [consentCrossBorder, setConsentCrossBorder] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState('');
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  const turnstileRef = useRef<HTMLDivElement>(null);
+  const widgetIdRef = useRef<string | null>(null);
+
+  // Рендер Cloudflare Turnstile (если ключ задан). Скрипт грузится в layout.tsx.
+  useEffect(() => {
+    if (!TURNSTILE_SITE_KEY) return;
+    let cancelled = false;
+    const tryRender = () => {
+      if (cancelled) return;
+      if (!turnstileRef.current || !window.turnstile) {
+        setTimeout(tryRender, 300);
+        return;
+      }
+      if (widgetIdRef.current) return; // уже отрендерен
+      widgetIdRef.current = window.turnstile.render(turnstileRef.current, {
+        sitekey: TURNSTILE_SITE_KEY,
+        callback: (token: string) => setTurnstileToken(token),
+        'expired-callback': () => setTurnstileToken(''),
+        theme: 'dark',
+        size: 'flexible',
+      });
+    };
+    tryRender();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const turnstileReady = !TURNSTILE_SITE_KEY || !!turnstileToken;
 
   const canSubmit =
     !!websiteUrl.trim() &&
@@ -42,6 +75,7 @@ export default function HeroForm() {
     !!email.trim() &&
     consentPersonal &&
     consentCrossBorder &&
+    turnstileReady &&
     !loading;
 
   const handleSubmit = useCallback(
@@ -66,6 +100,11 @@ export default function HeroForm() {
         return;
       }
 
+      if (TURNSTILE_SITE_KEY && !turnstileToken) {
+        setError('Подождите, идёт проверка «вы не робот».');
+        return;
+      }
+
       setLoading(true);
       try {
         const fingerprintId = await getFingerprint();
@@ -85,7 +124,7 @@ export default function HeroForm() {
           client_competitors: competitorsList.length ? competitorsList : undefined,
           consent_personal_data: consentPersonal,
           consent_cross_border: consentCrossBorder,
-          turnstile_token: '',
+          turnstile_token: turnstileToken,
           fingerprint_id: fingerprintId,
           hp_name: hpName,
           utm_source: searchParams.get('utm_source') || undefined,
@@ -115,6 +154,11 @@ export default function HeroForm() {
         } else {
           setError('Что-то пошло не так. Попробуйте ещё раз.');
         }
+        // Сбрасываем капчу — токен одноразовый.
+        if (widgetIdRef.current && window.turnstile) {
+          window.turnstile.reset(widgetIdRef.current);
+          setTurnstileToken('');
+        }
       } finally {
         setLoading(false);
       }
@@ -128,6 +172,7 @@ export default function HeroForm() {
       hpName,
       consentPersonal,
       consentCrossBorder,
+      turnstileToken,
       router,
       searchParams,
     ],
@@ -178,23 +223,23 @@ export default function HeroForm() {
         required
       />
 
-      {/* Этап 1.1 ТЗ — поле клиентских конкурентов (опционально) */}
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="competitors" className="text-sm font-medium text-brand-text">
-          Знаете своих конкурентов? Впишите через запятую{' '}
-          <span className="text-brand-muted font-normal">(опционально)</span>
+      {/* Срочный фикс 3.4 — поле конкурентов сделано заметным (предохранитель
+          против нерелевантных конкурентов для регионального бизнеса). */}
+      <div className="flex flex-col gap-1.5 rounded-xl border border-accent-700/40 bg-accent-900/10 p-4">
+        <label htmlFor="competitors" className="text-sm font-medium text-brand-textBright">
+          Знаете 2–3 конкурентов? Впишите — отчёт будет заметно точнее
         </label>
         <input
           id="competitors"
           type="text"
-          placeholder="Шепалово, Уссурийская заводь, Манома"
+          placeholder="Например: Шепалово, Уссурийская заводь, Манома"
           value={competitors}
           onChange={(e) => setCompetitors(e.target.value)}
           className="input-field"
         />
         <p className="text-xs text-brand-muted">
-          Если знаете — впишите. Если нет — мы подберём автоматически, но качество
-          будет ниже для региональных и нишевых бизнесов.
+          Особенно важно для регионального и нишевого бизнеса. Если не укажете —
+          подберём по поисковой выдаче вашей ниши и региона.
         </p>
       </div>
 
@@ -247,6 +292,9 @@ export default function HeroForm() {
           ).
         </ConsentCheckbox>
       </div>
+
+      {/* Cloudflare Turnstile (рендерится, если задан NEXT_PUBLIC_TURNSTILE_SITE_KEY) */}
+      {TURNSTILE_SITE_KEY && <div ref={turnstileRef} className="mt-1" />}
 
       {error && (
         <div className="border border-accent-700/60 bg-accent-900/30 rounded-xl px-4 py-3 text-sm text-accent-200">

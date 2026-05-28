@@ -46,6 +46,14 @@ class Settings(BaseSettings):
     CACHE_TTL_DAYS: int = 7
     DAILY_REPORT_LIMIT: int = 20
 
+    # === Срочные фиксы: дедуп и лимиты на запуск анализа ===
+    # Сколько дней переиспользуем готовый отчёт по тому же домену (не пересчитываем).
+    REPORT_REUSE_DAYS: int = 30
+    # Жёсткие лимиты на РЕАЛЬНЫЕ запуски (защита от скрутки денег на API).
+    MAX_ANALYSES_PER_EMAIL_PER_DAY: int = 2
+    MAX_ANALYSES_PER_IP_PER_DAY: int = 5
+    MAX_ANALYSES_PER_IP_PER_HOUR: int = 3
+
     # === Rate limits ===
     RATE_LIMIT_PER_DOMAIN_COUNT: int = 2
     RATE_LIMIT_PER_DOMAIN_BRAND_DAYS: int = 30

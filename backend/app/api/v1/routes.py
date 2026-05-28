@@ -25,7 +25,10 @@ from app.core.scorer import compare_with_competitors, get_model_breakdown, get_t
 from app.core.analyzer import Analysis
 from app.db.models.report import Report
 from app.db.repositories.report_repo import (
+    attach_email_to_report,
+    count_reports_since,
     create_report,
+    find_recent_report_by_domain,
     get_report,
     get_report_by_token,
     log_event,
@@ -33,8 +36,14 @@ from app.db.repositories.report_repo import (
     update_report_status,
 )
 from app.utils.logger import get_logger
-from app.utils.rate_limiter import check_can_create_report, get_queue_position
-from app.utils.url_normalizer import canonical_keys, extract_brand_from_url, mask_email, normalize_url
+from app.utils.rate_limiter import get_queue_position, verify_turnstile
+from app.utils.url_normalizer import (
+    canonical_keys,
+    extract_brand_from_url,
+    extract_root_domain,
+    mask_email,
+    normalize_url,
+)
 from app.utils.url_validator import validate_url as validate_client_url
 
 logger = get_logger(__name__)
@@ -53,36 +62,67 @@ async def start_check(
 
     ip = request.headers.get("X-Real-IP") or request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or (request.client.host if request.client else "0.0.0.0")
 
-    # Этап 1.2 ТЗ: валидация URL — формат, чёрный список агрегаторов, HEAD-проверка.
-    # На клиенте тоже валидируем (input[type=url] + JS), но бэк — последняя линия защиты.
+    # ── ЗАЩИТА ОТ АБУЗА (порядок по срочному ТЗ) ──────────────────────────────
+
+    # 1. Turnstile. Проверяем, только если задан секрет (иначе dev/без капчи).
+    if settings.TURNSTILE_SECRET_KEY:
+        if not await verify_turnstile(body.turnstile_token, ip):
+            logger.warning("turnstile_failed", ip=ip)
+            raise HTTPException(403, "Проверка «вы не робот» не пройдена. Обновите страницу.")
+
+    # 2. Honeypot — тихо притворяемся успехом, ничего не делаем.
+    if body.website_url_honeypot:
+        logger.warning("honeypot_triggered", ip=ip)
+        return CheckResponse(
+            report_id=__import__("uuid").uuid4(),
+            status="pending_verification",
+            message="Проверьте email.",
+            email=mask_email(str(body.email)),
+        )
+
+    # 3. Валидация URL — формат, чёрный список агрегаторов, HEAD-проверка.
     is_valid_url, normalized_url, url_error = await validate_client_url(body.url)
     if not is_valid_url:
         raise HTTPException(400, url_error or "Адрес сайта не прошёл проверку.")
-    # Используем нормализованный URL (с https://, без хвостов) во всём pipeline
     body_url = normalized_url
-
     brand_name = body.brand_name or extract_brand_from_url(body_url)
+    domain_normalized = extract_root_domain(body_url)
 
-    # Многослойная проверка защиты от абуза
-  #  can_create, reason = await check_can_create_report(
-    #    redis=redis,
-      #  email=str(body.email),
-        #url=body.url,
-        #brand=brand_name,
-        #fingerprint=body.browser_fingerprint,
-        #ip=ip,
-        #honeypot_value=body.website_url_honeypot,
-        #turnstile_token=body.turnstile_token,
-    #)
-    #if not can_create:
-      #  logger.warning("rate_limit_hit", reason=reason, ip=ip, email=str(body.email))
-        #raise HTTPException(429, f"Слишком много запросов: {reason}")
-# Временно разрешаем все запросы
-    can_create = True
-    reason = "disabled_bypass" # Временно разрешаем все запросы
+    # 4. Лимиты на РЕАЛЬНЫЕ запуски (защита денег на API).
+    now = datetime.utcnow()
+    email_str = str(body.email)
+    cnt_email_day = await count_reports_since(db, now - timedelta(days=1), email=email_str)
+    if cnt_email_day >= settings.MAX_ANALYSES_PER_EMAIL_PER_DAY:
+        raise HTTPException(429, "С этого email сегодня уже создан максимум отчётов. Попробуйте завтра или напишите нам.")
+    cnt_ip_hour = await count_reports_since(db, now - timedelta(hours=1), ip=ip)
+    if cnt_ip_hour >= settings.MAX_ANALYSES_PER_IP_PER_HOUR:
+        raise HTTPException(429, "Слишком много запросов. Подождите час.")
+    cnt_ip_day = await count_reports_since(db, now - timedelta(days=1), ip=ip)
+    if cnt_ip_day >= settings.MAX_ANALYSES_PER_IP_PER_DAY:
+        raise HTTPException(429, "Достигнут дневной лимит запросов с вашего адреса.")
+
+    # 5. Дедуп по домену — отдаём готовый отчёт, не запускаем pipeline заново.
+    reuse_since = now - timedelta(days=settings.REPORT_REUSE_DAYS)
+    existing = await find_recent_report_by_domain(db, domain_normalized, reuse_since)
+    if existing:
+        await attach_email_to_report(db, existing.id, email_str)
+        # Шлём этому email готовый отчёт (без пересчёта и без верификации —
+        # ничего дорогого не запускаем).
+        try:
+            from app.email.sender import EmailSender
+            await EmailSender(settings).send_report_ready(existing)
+        except Exception as exc:
+            logger.error("reuse_send_failed", error=str(exc))
+        logger.info("report_reused_by_domain", domain=domain_normalized, report_id=str(existing.id))
+        return CheckResponse(
+            report_id=existing.id,
+            status="completed",
+            message="Свежий отчёт по этому сайту уже готов — отправили его на ваш email.",
+            email=mask_email(email_str),
+        )
 
     verification_token = secrets.token_urlsafe(32)
-    expires_at = datetime.utcnow() + timedelta(hours=24)
+    expires_at = now + timedelta(hours=24)
     domain_key, domain_brand_key = canonical_keys(body_url, brand_name)
 
     # Подсказка ниши от клиента — сохраняем в niche_data как user_hint,
@@ -90,13 +130,11 @@ async def start_check(
     niche_hint = (body.niche_hint or "").strip() or None
     niche_data_initial = {"user_hint": niche_hint} if niche_hint else None
 
-    # Этап 1.4 ТЗ: фиксируем оба согласия с timestamp и IP клиента —
-    # это юридическое доказательство для НЦЗПД РБ.
-    now = datetime.utcnow()
-
+    # Этап 1.4 ТЗ: фиксируем оба согласия с timestamp и IP клиента (Закон РБ № 99-З).
     report = Report(
         url=body_url,
         url_normalized=normalize_url(body_url),
+        domain_normalized=domain_normalized,
         canonical_key=domain_brand_key,
         brand_name=brand_name,
         region=body.region,

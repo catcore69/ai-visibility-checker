@@ -67,6 +67,58 @@ async def log_event(
     await db.commit()
 
 
+async def find_recent_report_by_domain(
+    db: AsyncSession,
+    domain: str,
+    not_older_than: datetime,
+):
+    """Срочный фикс 2.1: ищем свежий ЗАВЕРШЁННЫЙ отчёт по домену.
+
+    Если есть — отдаём его (не запускаем дорогой pipeline заново).
+    """
+    if not domain:
+        return None
+    result = await db.execute(
+        select(Report)
+        .where(
+            Report.domain_normalized == domain,
+            Report.status == "completed",
+            Report.created_at >= not_older_than,
+        )
+        .order_by(Report.created_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def count_reports_since(
+    db: AsyncSession,
+    since: datetime,
+    email: Optional[str] = None,
+    ip: Optional[str] = None,
+) -> int:
+    """Срочный фикс 2.2: считает РЕАЛЬНЫЕ заявки за период по email или IP.
+
+    Считаем все созданные отчёты (любой статус), кроме чисто отказных —
+    важно ограничить именно создание (каждое = потенциальный запуск pipeline).
+    """
+    from sqlalchemy import func
+
+    stmt = select(func.count(Report.id)).where(Report.created_at >= since)
+    if email:
+        stmt = stmt.where(Report.email == email)
+    if ip:
+        stmt = stmt.where(Report.ip_address == ip)
+    result = await db.execute(stmt)
+    return int(result.scalar() or 0)
+
+
+async def attach_email_to_report(db: AsyncSession, report_id: UUID, email: str) -> None:
+    """При дедупе по домену: фиксируем, что этот email тоже запросил отчёт
+    (через событие — основной email отчёта не перетираем)."""
+    await log_event(db, report_id, "report_reused_for_email", metadata={"email": email})
+
+
 async def delete_old_unverified_reports(db: AsyncSession, older_than: datetime) -> int:
     """Удаляет неверифицированные заявки старше указанной даты."""
     from sqlalchemy import delete

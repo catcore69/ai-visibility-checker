@@ -21,7 +21,7 @@ from app.db.models import (  # noqa
     cached_response,
     niche_prompt_template,
     email_followup,
-)
+)  # bitrix_oauth удалён вместе с Bitrix — на free-тарифе он недоступен
 
 target_metadata = Base.metadata
 

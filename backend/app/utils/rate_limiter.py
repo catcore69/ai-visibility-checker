@@ -14,28 +14,34 @@ from app.utils.logger import get_logger
 logger = get_logger(__name__)
 
 async def verify_turnstile(token: str, ip: str) -> bool:
-    """Временно отключаем проверку Turnstile."""
-    return True
-#async def verify_turnstile(token: str, ip: str) -> bool:
- #   """Валидирует Cloudflare Turnstile токен."""
-#    if not settings.TURNSTILE_SECRET_KEY:
-  #      return True  # В dev режиме пропускаем
+    """Валидирует Cloudflare Turnstile токен через siteverify.
 
- #   try:
-  #      async with httpx.AsyncClient(timeout=5.0) as client:
-   #         resp = await client.post(
-    #            "https://challenges.cloudflare.com/turnstile/v0/siteverify",
-     #           data={
-      #              "secret": settings.TURNSTILE_SECRET_KEY,
-       #             "response": token,
-        #            "remoteip": ip,
-         #       },
-          #  )
-           # data = resp.json()
-            #return data.get("success", False)
-  #  except Exception as exc:
-   #     logger.warning("turnstile_error", error=str(exc))
-    #    return True  # Fail open — не блокируем при сбое капчи
+    - Если секрет не задан — пропускаем (dev).
+    - Если задан, но токена нет — отказ.
+    - Реальная проверка через API Cloudflare.
+    - При сетевом сбое самого Cloudflare — fail-open (не блокируем
+      легитимных клиентов из-за недоступности капчи), но это логируется.
+    """
+    if not settings.TURNSTILE_SECRET_KEY:
+        return True  # капча не настроена — не блокируем
+    if not token:
+        return False  # секрет есть, а токена нет → бот/обход
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(
+                "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+                data={
+                    "secret": settings.TURNSTILE_SECRET_KEY,
+                    "response": token,
+                    "remoteip": ip,
+                },
+            )
+            data = resp.json()
+            return bool(data.get("success", False))
+    except Exception as exc:
+        logger.warning("turnstile_error", error=str(exc))
+        return True  # fail-open при недоступности Cloudflare
 
 
 async def check_can_create_report(

@@ -100,6 +100,11 @@ class Report(Base):
     unsubscribe_token = Column(String(64), nullable=True, unique=True)
     unsubscribed_at = Column(DateTime, nullable=True)
 
+    # Срочные фиксы: дедуп по домену + подсчёт лимитов.
+    domain_normalized = Column(String(255), nullable=True, index=True)
+    # Флаг «мало релевантных конкурентов» — подсветить эксперту.
+    competitor_quality_low = Column(Boolean, default=False, nullable=False)
+
     # Этап 5.2.3 ТЗ: заявка на разговор с экспертом (горячий лид).
     client_name = Column(String(200), nullable=True)
     client_phone = Column(String(32), nullable=True)
