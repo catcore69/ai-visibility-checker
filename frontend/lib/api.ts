@@ -12,10 +12,12 @@ export const api = axios.create({
 
 export interface CheckPayload {
   url: string;
-  brand_name: string;
-  niche: string;
   email: string;
-  /** Этап 1.1 ТЗ — конкуренты, указанные клиентом (опционально, до 5). */
+  /** Бренд и ниша больше НЕ вводятся в форме — определяются парсингом сайта
+      (Задача 5.1). Оставлены опциональными для обратной совместимости. */
+  brand_name?: string;
+  niche?: string;
+  /** Задача 5.2 — ссылки на сайты конкурентов (по одной на строку, до 5). */
   client_competitors?: string[];
   /** Этап 1.4 ТЗ — оба обязательны на форме, бэк проверяет повторно. */
   consent_personal_data: boolean;

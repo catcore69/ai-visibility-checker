@@ -152,11 +152,18 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
             "city": region_info.get("city"),
             "confidence": region_info.get("confidence"),
         }
+        # Задача 5.1: бренд определён парсингом — обновляем имя бренда отчёта,
+        # если форма прислала только URL-плейсхолдер.
+        detected_brand = (niche.get("brand") or "").strip()
+        effective_brand = detected_brand or report.brand_name
         await update_report_field(
             db, report_id,
             niche_data=niche,
+            brand_name=effective_brand,
             region=niche.get("region") or effective_region or report.region,
         )
+        # Освежаем объект, чтобы дальше использовать новый бренд.
+        report = await get_report(db, report_id)
         await update_report_status(db, report_id, "competitor_discovery", progress=15)
 
         # ШАГ 3: Конкуренты (Этап 1.1 ТЗ — учитываем указанных клиентом).
