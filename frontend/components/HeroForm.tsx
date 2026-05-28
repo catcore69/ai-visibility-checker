@@ -133,9 +133,15 @@ export default function HeroForm() {
         };
 
         const result = await submitCheck(payload);
-        router.push(
-          `/proverka/verify-email?id=${result.report_id}&email=${encodeURIComponent(email)}`,
-        );
+        // Дедуп по домену: отчёт уже готов и отправлен на email — ведём сразу на него,
+        // без страницы «подтвердите email» (верификация в этом случае не нужна).
+        if (result.status === 'completed') {
+          router.push(`/otchet/${result.report_id}?reused=1`);
+        } else {
+          router.push(
+            `/proverka/verify-email?id=${result.report_id}&email=${encodeURIComponent(email)}`,
+          );
+        }
       } catch (err: unknown) {
         const axiosErr = err as {
           response?: { data?: { detail?: string | unknown[] } };

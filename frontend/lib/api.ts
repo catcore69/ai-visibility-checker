@@ -31,6 +31,8 @@ export interface CheckPayload {
 
 export interface CheckResponse {
   report_id: string;
+  /** "pending_verification" — нужна верификация; "completed" — отчёт уже готов (дедуп по домену). */
+  status?: string;
   message: string;
   queue_position?: number;
 }
