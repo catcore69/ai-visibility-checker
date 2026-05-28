@@ -4,10 +4,13 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { getReportStatus, type ReportStatus } from '@/lib/api';
 import ProgressTracker from '@/components/ProgressTracker';
+import ExpertCallBlock from '@/components/ExpertCallBlock';
 import { Logo } from '@/components/Logo';
 
 const POLL_INTERVAL = 5_000;
 const MAX_WAIT_MS = 15 * 60 * 1000;
+// Этап 5.2.2 ТЗ: блок сбора контактов появляется только после 70% прогресса.
+const CONTACT_BLOCK_THRESHOLD = 70;
 
 export default function StatusPage() {
   const params = useParams();
@@ -17,6 +20,8 @@ export default function StatusPage() {
   const [status, setStatus] = useState<ReportStatus | null>(null);
   const [error, setError] = useState('');
   const [startedAt] = useState(Date.now());
+  // Состояние блока «Хочу комментарий эксперта»: показан ли он и закрыт ли клиентом.
+  const [contactResolved, setContactResolved] = useState(false);
 
   const poll = useCallback(async () => {
     try {
@@ -105,6 +110,18 @@ export default function StatusPage() {
               <div className="w-10 h-10 border-2 border-brand-border border-t-accent-400 rounded-full animate-spin" />
             </div>
           )}
+
+          {/* Этап 5.2.2 ТЗ: блок «Хочу комментарий эксперта» появляется после 70%. */}
+          {status &&
+            !contactResolved &&
+            ((status as any).progress ?? status.progress_pct ?? 0) >= CONTACT_BLOCK_THRESHOLD && (
+              <div className="mt-8">
+                <ExpertCallBlock
+                  reportId={reportId}
+                  onResolved={() => setContactResolved(true)}
+                />
+              </div>
+            )}
 
           <p className="text-center text-xs text-brand-muted mt-10">
             Результат также будет отправлен на вашу почту ·{' '}
