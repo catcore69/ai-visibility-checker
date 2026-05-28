@@ -15,28 +15,30 @@ async def detect_niche(
     brand_name: str,
     region: str,
     user_hint: Optional[str] = None,
+    site_text: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Определяет нишу бизнеса через LLM (1 вызов).
+    """Определяет нишу бизнеса через LLM по РЕАЛЬНОМУ контенту сайта (Задача 4.3).
 
-    Если задан `user_hint` — это явное описание ниши, которое клиент ввёл
-    в форме. Подсказка имеет приоритет над тем, что LLM «угадывает» по URL.
-    LLM в этом случае должна не выдумывать категорию, а структурировать
-    подсказку клиента (subcategory, target_audience, language, …).
+    - `region` — регион, уже определённый region_detector (приоритетен).
+    - `site_text` — текст главной страницы (определяем нишу по нему, а не по URL).
+    - `user_hint` — необязательная подсказка клиента (если поле ещё есть).
     """
     client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, base_url=settings.OPENAI_BASE_URL)
 
     hint_clean = (user_hint or "").strip()
     hint_block = (
-        f"\n\nКЛИЕНТ САМ УКАЗАЛ НИШУ В ФОРМЕ: «{hint_clean}»\n"
-        "Это АВТОРИТЕТНАЯ подсказка — используй её как `category`/`subcategory` "
-        "и подбери остальные поля под неё. НЕ перепрыгивай в другую нишу, "
-        "даже если на сайте мало контента или сайт пустой."
+        f"\n\nКЛИЕНТ САМ УКАЗАЛ НИШУ: «{hint_clean}» — используй как category/subcategory."
         if hint_clean
         else ""
     )
 
+    content = (site_text or "").strip()[:6000] or "(не удалось загрузить контент сайта)"
+
     prompt = NICHE_DETECTOR_PROMPT.format(
-        url=url, brand_name=brand_name, region=region
+        url=url,
+        brand_name=brand_name,
+        region=region or "не определён — определи по контенту, НЕ предполагай Россию",
+        site_content=content,
     ) + hint_block
 
     response = await client.chat.completions.create(
@@ -56,13 +58,19 @@ async def detect_niche(
         niche_data = {
             "category": hint_clean or "Бизнес",
             "subcategory": hint_clean or "Общее",
-            "region": region,
+            "business_type": "service",
+            "region": region or "unknown",
             "target_audience": "B2C",
             "target_audience_description": "потребители",
             "language": "ru",
             "is_local": False,
             "typical_user_questions": [],
         }
+
+    # Жёстко определённый регион (region_detector) приоритетнее догадки LLM:
+    # если он передан — не даём модели его перетереть.
+    if region:
+        niche_data["region"] = region
 
     # Гарантируем, что подсказка клиента не теряется и остаётся в JSON.
     if hint_clean:

@@ -214,9 +214,22 @@ async def _llm_extract_companies(
 
     lines = "\n".join(f"- {c['title']} ({c['domain']})" for c in candidates[:20])
     exclude_str = ", ".join(exclude) if exclude else "—"
+    btype = niche.get("business_type", "")
+    btype_map = {
+        "service": "оказывают УСЛУГИ того же рода (не продают софт и не товары)",
+        "product": "продают ТОВАРЫ того же рода",
+        "saas": "являются программным продуктом/платформой (SaaS) того же рода",
+        "media": "являются СМИ/блогом/контент-площадкой того же рода",
+    }
+    btype_line = (
+        f"Тип бизнеса клиента: {btype}. Бери ТОЛЬКО конкурентов, которые {btype_map[btype]}. "
+        f"Например, для бухгалтерского аутсорса (услуга) НЕ бери 1С/Контур (это SaaS).\n"
+        if btype in btype_map else ""
+    )
     prompt = (
         f"Ниша: {niche.get('category','')} / {niche.get('subcategory','')}.\n"
         f"Регион: {niche.get('region','')}.\n"
+        f"{btype_line}"
         f"Исключить (это сам клиент или уже учтённые): {exclude_str}.\n\n"
         f"Ниже — результаты поиска. Выбери из них РЕАЛЬНЫЕ компании-конкуренты, "
         f"которые оказывают услуги «{niche.get('category','')}» в регионе "

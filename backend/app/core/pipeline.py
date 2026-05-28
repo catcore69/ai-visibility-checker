@@ -127,12 +127,36 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
 
         await update_report_status(db, report_id, "niche_detection", progress=5)
 
-        # ШАГ 2: Ниша — учитываем подсказку клиента из формы (niche_data.user_hint).
+        # ШАГ 2а (Задача 4): РЕГИОН из жёстких сигналов сайта, а не из формы.
+        # Форма больше не диктует регион (там был дефолт «Россия» — корень багов).
+        from app.core.region_detector import detect_region
+        region_info, site_text = await detect_region(report.url)
+        detected_region = region_info.get("region") or ""  # "" если unknown
+        # Если детектор уверенно определил регион — используем его как основной.
+        effective_region = detected_region or report.region or ""
+
+        # ШАГ 2б: Ниша — по РЕАЛЬНОМУ контенту сайта + определённому региону.
         user_hint = None
         if isinstance(report.niche_data, dict):
             user_hint = report.niche_data.get("user_hint")
-        niche = await detect_niche(report.url, report.brand_name, report.region, user_hint=user_hint)
-        await update_report_field(db, report_id, niche_data=niche)
+        niche = await detect_niche(
+            report.url,
+            report.brand_name,
+            effective_region,
+            user_hint=user_hint,
+            site_text=site_text,
+        )
+        # Кладём в niche итоговый регион + сигналы (для прозрачности/отладки).
+        niche["region_detection"] = {
+            "country": region_info.get("country"),
+            "city": region_info.get("city"),
+            "confidence": region_info.get("confidence"),
+        }
+        await update_report_field(
+            db, report_id,
+            niche_data=niche,
+            region=niche.get("region") or effective_region or report.region,
+        )
         await update_report_status(db, report_id, "competitor_discovery", progress=15)
 
         # ШАГ 3: Конкуренты (Этап 1.1 ТЗ — учитываем указанных клиентом).
