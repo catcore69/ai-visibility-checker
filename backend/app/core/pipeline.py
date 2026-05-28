@@ -196,6 +196,14 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
                 leader_name=None,
             )
 
+            # Срочный фикс 3.3: фактчек релевантности конкурентов.
+            # Если источник — llm_fallback (модель «из головы») или у <3 конкурентов
+            # не нашёлся живой сайт — помечаем отчёт флагом и подсветим эксперту.
+            urls_found = sum(1 for c in competitor_urls if c.get("url"))
+            competitor_quality_low = (
+                competitors_source == "llm_fallback" or urls_found < 3
+            )
+
             await update_report_field(
                 db,
                 report_id,
@@ -203,7 +211,15 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
                 client_site_analysis=client_site_analysis,
                 competitors_site_analysis=competitors_site_analysis,
                 gap_analysis=gap,
+                competitor_quality_low=competitor_quality_low,
             )
+            if competitor_quality_low:
+                logger.warning(
+                    "competitor_quality_low",
+                    report_id=str(report_id),
+                    source=competitors_source,
+                    urls_found=urls_found,
+                )
         except Exception as exc:
             logger.error("site_analysis_step_failed", error=str(exc), error_type=type(exc).__name__)
             # Не блокируем pipeline — без site-analysis отчёт всё равно собирается.

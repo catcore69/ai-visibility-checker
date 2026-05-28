@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -39,7 +40,11 @@ class BasePoller(ABC):
 
     async def query(self, prompt: str, niche_key: str) -> LLMResponse:
         """С кэшем и retry (3 попытки, exponential backoff)."""
-        cache_key = f"{self.name}:{niche_key}:{hash(prompt)}"
+        # Срочный фикс: hash() для строк рандомизирован между процессами
+        # (PYTHONHASHSEED) → ключ менялся после рестарта воркера и кеш промахивался.
+        # Используем детерминированный md5.
+        prompt_hash = hashlib.md5(prompt.encode("utf-8")).hexdigest()[:16]
+        cache_key = f"{self.name}:{niche_key}:{prompt_hash}"
 
         cached_text = await self.cache.get(cache_key)
         if cached_text:
