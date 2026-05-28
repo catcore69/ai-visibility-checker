@@ -82,7 +82,9 @@ class EmailSender:
             },
         )
 
-    async def send_report_ready(self, report) -> bool:
+    async def send_report_ready(self, report, override_email: str | None = None) -> bool:
+        # override_email — для дедупа по домену: отправить готовый отчёт НА АДРЕС,
+        # который ввёл новый клиент, а не на почту из старого отчёта.
         base = self.config.STUDIO_FULL_URL.rstrip("/")
         report_url = f"{base}/otchet/{report.id}"
         # Скачивание PDF идёт через НАШ домен (а не через прямую ссылку на S3) —
@@ -118,7 +120,7 @@ class EmailSender:
             # только имя.
 
         return await self.send(
-            to_email=report.email,
+            to_email=override_email or report.email,
             subject=f"{report.brand_name}: ваш AI Visibility Score — {report.visibility_score}/100",
             template_name="report_ready.html",
             context={

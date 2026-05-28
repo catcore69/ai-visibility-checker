@@ -106,11 +106,11 @@ async def start_check(
     existing = await find_recent_report_by_domain(db, domain_normalized, reuse_since)
     if existing:
         await attach_email_to_report(db, existing.id, email_str)
-        # Шлём этому email готовый отчёт (без пересчёта и без верификации —
-        # ничего дорогого не запускаем).
+        # Шлём готовый отчёт НА ВВЕДЁННЫЙ адрес (не на почту старого отчёта!),
+        # без пересчёта и без верификации — ничего дорогого не запускаем.
         try:
             from app.email.sender import EmailSender
-            await EmailSender(settings).send_report_ready(existing)
+            await EmailSender(settings).send_report_ready(existing, override_email=email_str)
         except Exception as exc:
             logger.error("reuse_send_failed", error=str(exc))
         logger.info("report_reused_by_domain", domain=domain_normalized, report_id=str(existing.id))
