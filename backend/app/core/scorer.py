@@ -140,22 +140,38 @@ def compare_with_competitors(
 ) -> list[dict]:
     """Сравнение бренда с конкурентами по Score."""
     results = []
+    total_models = analysis.total_models
     for brand in all_brands:
         score = calculate_visibility_score(analysis, brand)
         presence = calculate_presence_rate(analysis, brand)
         sov = calculate_share_of_voice(analysis, brand)
+
+        # Срочный фикс 6.2: реальный Model Coverage (раньше было захардкожено 0).
+        brand_results = analysis.get_brand_results(brand)
+        mentioned = [r for r in brand_results if r.mentioned]
+        models_found = len({r.model_name for r in mentioned})
+
+        # Срочный фикс 6.5: реальная доминирующая тональность (раньше всегда neutral).
+        if mentioned:
+            sent_counts = {"positive": 0, "neutral": 0, "negative": 0}
+            for r in mentioned:
+                sent_counts[r.sentiment if r.sentiment in sent_counts else "neutral"] += 1
+            dominant_sentiment = max(sent_counts, key=sent_counts.get)
+        else:
+            dominant_sentiment = "neutral"
+
         results.append(
             {
                 "brand_name": brand,
+                "name": brand,
                 "is_client": brand == brand_name,
                 "score": score,
                 "presence_rate": presence,
                 "share_of_voice": sov,
-            "name": brand,
-            "sov": sov,
-            "models_found": 0,
-            "models_total": 0,
-            "dominant_sentiment": "neutral",
+                "sov": sov,
+                "models_found": models_found,
+                "models_total": total_models,
+                "dominant_sentiment": dominant_sentiment,
             }
         )
     return sorted(results, key=lambda x: x["score"], reverse=True)
