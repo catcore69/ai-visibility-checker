@@ -77,6 +77,11 @@ class Settings(BaseSettings):
     CELERY_WORKER_CONCURRENCY: int = 2
     CELERY_TASK_TIME_LIMIT: int = 600
 
+    # Жёсткий таймаут на ОДИН вызов LLM-модели (сек). Защита от зависшего
+    # HTTP-запроса, который морозит весь опрос (asyncio.gather ждёт вечно →
+    # отчёт навсегда застревает на polling_models). См. llm_pollers/base.py.
+    LLM_CALL_TIMEOUT: int = 45
+
     # === S3 ===
     S3_ENDPOINT_URL: str = "https://s3.timeweb.cloud"
     S3_ACCESS_KEY: str = ""
