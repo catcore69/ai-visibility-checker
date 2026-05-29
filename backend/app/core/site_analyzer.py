@@ -182,11 +182,13 @@ def looks_generic_name(name: str) -> bool:
     return len(meaningful) == 0
 
 
-async def fetch_org_name(url: str) -> Optional[str]:
-    """Итерация-3, Задача 1.2: настоящее название организации с её сайта.
+async def fetch_site_summary(url: str) -> Optional[dict]:
+    """Лёгкий fetch сайта: реальное название организации + кусок видимого текста.
 
-    Лёгкий fetch (без полного analyze_site) + извлечение из schema.org/og:site_name/
-    подвала. НЕ из <title>. None — если сайт не открылся / название не извлеклось.
+    Один HTTP-запрос (без analyze_site, без Playwright). Используется в:
+    - подборе конкурентов (имя + категорийная проверка контента, Задача 4 Итер-3);
+    - дешёвой верификации, что сайт кандидата реально про ту же услугу.
+    Возвращает {"org_name": str|None, "text": str} или None если сайт не открылся.
     """
     if not url or not url.startswith(("http://", "https://")):
         return None
@@ -204,10 +206,20 @@ async def fetch_org_name(url: str) -> Optional[str]:
             if resp.status_code >= 400 or not resp.text:
                 return None
             soup = BeautifulSoup(resp.text, "html.parser")
-            return _extract_org_name(soup, url)
+            org_name = _extract_org_name(soup, url)
+            for s in soup(["script", "style", "noscript"]):
+                s.decompose()
+            text = soup.get_text(" ", strip=True)[:8000].lower()
+            return {"org_name": org_name, "text": text}
     except Exception as exc:
-        logger.warning("fetch_org_name_error", url=url, error=str(exc))
+        logger.warning("fetch_site_summary_error", url=url, error=str(exc))
         return None
+
+
+async def fetch_org_name(url: str) -> Optional[str]:
+    """Только название (обёртка над fetch_site_summary)."""
+    summary = await fetch_site_summary(url)
+    return summary.get("org_name") if summary else None
 
 
 def _org_name_from_jsonld(soup: BeautifulSoup) -> Optional[str]:
