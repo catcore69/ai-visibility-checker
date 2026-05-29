@@ -302,8 +302,9 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
             # Если источник — llm_fallback (модель «из головы») или у <3 конкурентов
             # не нашёлся живой сайт — помечаем отчёт флагом и подсветим эксперту.
             urls_found = sum(1 for c in competitor_urls if c.get("url"))
+            # «sparse» (Итерация-3) — честный сигнал «ниша свободна», тоже подсвечиваем эксперту.
             competitor_quality_low = (
-                competitors_source == "llm_fallback" or urls_found < 3
+                competitors_source in ("llm_fallback", "sparse") or urls_found < 3
             )
 
             await update_report_field(

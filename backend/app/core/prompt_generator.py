@@ -100,7 +100,7 @@ async def _generate_via_llm(niche: dict[str, Any], count: int) -> list[str]:
 
     try:
         response = await client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=settings.MODEL_TEXT,
             messages=[{"role": "user", "content": prompt}],
             # Низкая температура → промпты для одной ниши получаются ближе
             # друг к другу, но кеш делает это окончательно детерминированным.

@@ -114,7 +114,7 @@ async def _analyze_mention_with_llm(
 
     try:
         response = await client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=settings.MODEL_ANALYSIS,
             messages=[{"role": "user", "content": llm_prompt}],
             temperature=0,
             max_tokens=800,

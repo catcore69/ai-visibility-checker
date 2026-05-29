@@ -334,7 +334,12 @@ async def build_and_upload_pdf(report, analysis: Analysis, competitors: list[str
     # ===== Итерация-2, А2: «ниша свободна» vs «догони лидера» =====
     competitor_presences = [c.get("presence_rate", 0) for c in comparison if not c.get("is_client")]
     max_competitor_presence = max(competitor_presences) if competitor_presences else 0
-    niche_is_open = max_competitor_presence < settings.NICHE_OPEN_PRESENCE_MAX
+    # Итерация-3: если конкурентов нашлось мало (source=="sparse") — это прямой
+    # сигнал «ниша свободна» (реальных игроков нет), форсим эту ветку независимо от Presence.
+    niche_is_open = (
+        max_competitor_presence < settings.NICHE_OPEN_PRESENCE_MAX
+        or (report.competitors_source == "sparse")
+    )
     niche_has_strong_leader = max_competitor_presence > settings.NICHE_STRONG_LEADER_PRESENCE
     _total_p = analysis.total_prompts or 0
     leader_presence_count = round(max_competitor_presence / 100 * _total_p) if _total_p else 0

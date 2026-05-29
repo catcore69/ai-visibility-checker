@@ -26,6 +26,12 @@ async def generate_recommendations(
     strong_models = get_strong_models(analysis, brand_name)
     top_sources = get_top_sources(analysis)
 
+    # Итерация-3, Задача 3: площадки берём из справочника по региону клиента,
+    # а не даём модели выдумывать (vc.ru белорусу — больше не повторится).
+    from app.data.regional_platforms import get_platforms_for
+    platforms = get_platforms_for(niche.get("region", ""), niche.get("target_audience"))
+    platforms_str = ", ".join(platforms) if platforms else "—"
+
     # Топ конкуренты, у которых score > score клиента
     from app.core.scorer import compare_with_competitors, calculate_visibility_score
     all_brands = [brand_name] + competitors
@@ -46,10 +52,12 @@ async def generate_recommendations(
         strong_models=", ".join(strong_models) or "нет",
         top_competitors=", ".join(better_competitors) or "нет",
         top_sources=", ".join(top_sources[:5]) or "нет",
+        platforms=platforms_str,
+        first_platform=(platforms[0] if platforms else "профильной площадке"),
     )
 
     response = await client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=settings.MODEL_TEXT,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.5,
         max_tokens=1200,

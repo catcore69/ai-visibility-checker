@@ -42,7 +42,7 @@ async def detect_niche(
     ) + hint_block
 
     response = await client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=settings.MODEL_NICHE,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3,
         max_tokens=600,

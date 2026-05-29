@@ -119,7 +119,7 @@ async def _find_competitors_via_llm(
 
     try:
         response = await client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=settings.MODEL_EXTRACTION,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             max_tokens=300,
@@ -284,7 +284,7 @@ async def _llm_extract_companies(
     )
     try:
         response = await client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=settings.MODEL_EXTRACTION,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
             max_tokens=300,
@@ -325,6 +325,10 @@ async def _find_competitors_via_serp(
         return []
 
     confirmed = await _llm_extract_companies(candidates, niche, exclude, count)
+    # Итерация-3, Задача 1.2/4: отбрасываем родовые словосочетания-категории
+    # («Бухгалтерские услуги», «Аудит и консалтинг») — это не названия компаний.
+    from app.core.site_analyzer import looks_generic_name
+    confirmed = [c for c in confirmed if not looks_generic_name(c)]
     logger.info("competitors_from_serp", query=query, found=len(confirmed))
     return confirmed
 
@@ -337,13 +341,14 @@ async def find_competitors(
 ) -> tuple[list[str], str]:
     """Подбирает конкурентов клиента.
 
-    Возвращает (список, источник): "client" / "mixed" / "serp" / "llm_fallback".
+    Возвращает (список, источник): "client" / "mixed" / "serp" / "sparse".
 
-    Приоритет (срочный фикс 3.1):
+    Приоритет (Итерация-3, Задача 1.4 — разворот на реальные данные):
     1. Конкуренты от клиента (≥3) — самые точные.
-    2. Реальная поисковая выдача через XMLRiver (НЕ из памяти модели) — для
-       региональных/нишевых бизнесов это критично: модель не знает локальных игроков.
-    3. LLM «из головы» — только если SERP ничего не дал. Помечаем low-confidence.
+    2. Реальная поисковая выдача через XMLRiver (НЕ из памяти модели).
+    3. Если реальных <3 — честно «sparse» (ниша свободна). НИКОГДА не выдумываем
+       конкурентов через LLM «из головы»: лучше «в нише мало игроков» (правда),
+       чем правдоподобная ложь, которая убивает доверие к отчёту.
     """
     # Задача 5.2: клиент вводит ссылки/названия — нормализуем (URL → имя, фильтр агрегаторов).
     client_list = _normalize_client_competitors(client_competitors, brand_name)[:count]
@@ -353,25 +358,19 @@ async def find_competitors(
         if len(client_list) >= count:
             logger.info("competitors_from_client_only", count=len(client_list), brand=brand_name)
             return client_list[:count], "client"
-        # Добиваем из SERP, затем (если не хватило) из LLM.
+        # Добиваем ТОЛЬКО реальной выдачей (никакого LLM-добивания).
         exclude = client_list + [brand_name]
         serp_extra = await _find_competitors_via_serp(niche, exclude=exclude, count=count)
         merged = _merge_dedupe(client_list, serp_extra, count)
-        if len(merged) < count:
-            llm_extra = await _find_competitors_via_llm(niche, brand_name, count)
-            merged = _merge_dedupe(merged, llm_extra, count)
         logger.info("competitors_mixed", client=len(client_list), total=len(merged), brand=brand_name)
         return merged, "mixed"
 
-    # Приоритет 2: реальный поиск (главный фикс релевантности).
+    # Приоритет 2: реальный поиск (главный источник).
     serp_competitors = await _find_competitors_via_serp(niche, exclude=[brand_name], count=count)
     if len(serp_competitors) >= 3:
         return serp_competitors[:count], "serp"
 
-    # Приоритет 3 (fallback): LLM из головы — низкая достоверность, честно помечаем.
-    llm_competitors = await _find_competitors_via_llm(niche, brand_name, count)
-    # Если SERP что-то дал (1-2), смешиваем с LLM, чтобы не терять реальные имена.
-    if serp_competitors:
-        llm_competitors = _merge_dedupe(serp_competitors, llm_competitors, count)
-    logger.info("competitors_llm_fallback", count=len(llm_competitors), brand=brand_name)
-    return llm_competitors[:count], "llm_fallback"
+    # Приоритет 3: реальных конкурентов <3 → честный сигнал «ниша свободна».
+    # Возвращаем что нашли (0-2 реальных), отчёт уйдёт в ветку «ниша свободна».
+    logger.info("competitors_sparse", count=len(serp_competitors), brand=brand_name)
+    return serp_competitors[:count], "sparse"

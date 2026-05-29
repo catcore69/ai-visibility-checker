@@ -24,6 +24,19 @@ class Settings(BaseSettings):
     # === LLM APIs ===
     OPENAI_API_KEY: str = ""
     OPENAI_BASE_URL: str = "https://yellow-paper-e50f.kitten-69.workers.dev/v1"
+
+    # === Модели по задачам (Итерация-3, Задача 5) ===
+    # Дефолт = текущая gpt-4o-mini (нулевое изменение поведения). Фаундер может
+    # поднять MODEL_NICHE до gpt-4.1/gpt-4o в .env — точнее определяет нишу и
+    # стабильнее между прогонами. Остальные языковые задачи mini тянет.
+    MODEL_NICHE: str = "gpt-4o-mini"        # определение ниши из контента (фактчувствительно)
+    MODEL_EXTRACTION: str = "gpt-4o-mini"   # извлечение брендов/компаний из текста
+    MODEL_TEXT: str = "gpt-4o-mini"         # группировка запросов, оформление рекомендаций
+    MODEL_ANALYSIS: str = "gpt-4o-mini"     # анализ упоминаний/тональности
+
+    # Рендер сайтов через headless-браузер (Playwright). По умолчанию OFF —
+    # образ не раздуваем. Включать только после подготовки Docker-образа с браузерами.
+    USE_PLAYWRIGHT: bool = False
     GEMINI_API_KEY: str = ""
     DEEPSEEK_API_KEY: str = ""
     PERPLEXITY_API_KEY: str = ""
