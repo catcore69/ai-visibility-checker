@@ -124,6 +124,16 @@ async def _analyze_mention_with_llm(
         data = json.loads(raw)
         brand_results: list[dict] = data.get("brands", [])
         citations: list[str] = data.get("citations", [])
+        # Итерация-3: апгрейд тональности на основе is_recommendation.
+        # Если ИИ РЕКОМЕНДУЕТ бренд (а не просто перечислил) — это позитивный
+        # сигнал, даже если LLM-as-judge поставил neutral. Симметрично:
+        # negative оставляем как есть (явный негатив сильнее рекомендации).
+        for br in brand_results:
+            if not br.get("mentioned"):
+                continue
+            sent = br.get("sentiment", "neutral")
+            if br.get("is_recommendation") and sent == "neutral":
+                br["sentiment"] = "positive"
         return brand_results, citations
     except Exception as exc:
         logger.error("mention_analyzer_error", error=str(exc))
