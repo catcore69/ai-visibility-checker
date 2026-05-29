@@ -316,13 +316,15 @@ async def _find_competitors_via_serp(
     компании С САМОГО САЙТА (schema.org/og:site_name/подвал) — НЕ из <title>
     (там SEO-фразы). Сайт не открылся / название не извлеклось → не конкурент.
     """
-    from app.core.site_analyzer import fetch_org_name, looks_generic_name
+    from app.core.site_analyzer import fetch_site_summary, looks_generic_name
     from app.utils.url_normalizer import extract_brand_from_url
 
     category = niche.get("category", "")
-    subcategory = niche.get("subcategory", "")
     region = niche.get("region", "")
-    query = " ".join(p for p in [category, subcategory, region] if p).strip()
+    city = _city_from_region(region) or region
+    # Чистый запрос: «{категория} {город}». Без подкатегории и без «, Беларусь» —
+    # длинные хвосты гробят выдачу (раньше получали 0 результатов).
+    query = " ".join(p for p in [category, city] if p).strip()
     if not query:
         return []
 
@@ -337,23 +339,35 @@ async def _find_competitors_via_serp(
             continue
         seen_domains.add(d)
         real_urls.append(r["url"])
-    real_urls = real_urls[: max(count * 2, 8)]
+    real_urls = real_urls[: max(count * 3, 12)]  # запас на отсев по категории
     if not real_urls:
         logger.info("competitors_from_serp", query=query, real_domains=0, found=0)
         return []
 
-    # Параллельно заходим на каждый сайт и достаём реальное название организации.
-    names = await asyncio.gather(*[fetch_org_name(u) for u in real_urls], return_exceptions=True)
+    # Параллельно заходим на каждый сайт: имя + кусок текста для проверки категории.
+    summaries = await asyncio.gather(
+        *[fetch_site_summary(u) for u in real_urls], return_exceptions=True
+    )
+    keywords = _category_keywords(niche)
 
     excl_lower = {e.strip().lower() for e in exclude if e}
     out: list[str] = []
     seen_names: set[str] = set()
-    for u, nm in zip(real_urls, names):
-        name = nm if isinstance(nm, str) and nm.strip() else None
-        if not name:
-            # Сайт открылся, но название не извлеклось → берём бренд из домена
-            # (buhvitebsk.by → «Buhvitebsk»). Не выдумка — это реальный домен.
-            name = extract_brand_from_url(u) if isinstance(nm, str) or nm is None else None
+    rejected_off_topic = 0
+    for u, summ in zip(real_urls, summaries):
+        if not isinstance(summ, dict):
+            continue
+        org_name = (summ.get("org_name") or "").strip()
+        text = summ.get("text") or ""
+
+        # Итер-3, Задача 4: entity disambiguation — сайт должен быть про ту же услугу.
+        # Это адаптивная защита от «Дом Книги»/«Т-Банк» в бухгалтерской нише
+        # (и наоборот не сломает банковскую нишу — там стем будет «банков»).
+        if not _site_matches_category(text, keywords):
+            rejected_off_topic += 1
+            continue
+
+        name = org_name if org_name else extract_brand_from_url(u)
         if not name or looks_generic_name(name):
             continue
         nl = name.lower()
@@ -364,8 +378,48 @@ async def _find_competitors_via_serp(
         if len(out) >= count:
             break
 
-    logger.info("competitors_from_serp", query=query, real_domains=len(real_urls), found=len(out))
+    logger.info(
+        "competitors_from_serp",
+        query=query,
+        real_domains=len(real_urls),
+        found=len(out),
+        rejected_off_topic=rejected_off_topic,
+        keywords=keywords,
+    )
     return out
+
+
+def _category_keywords(niche: dict[str, Any]) -> list[str]:
+    """Итерация-3, Задача 4: отличительные стемы категории — для проверки,
+    что сайт кандидата реально про эту услугу. Грубое стемм-сокращение (6 букв),
+    выкидываем родовые слова (услуги/компания/...) — оставляем только специфичные.
+    «Бухгалтерские услуги» → ['бухгал']; «Юридические услуги» → ['юридич'].
+    """
+    from app.core.site_analyzer import _GENERIC_WORDS
+    raw = " ".join([niche.get("category", ""), niche.get("subcategory", "")]).lower()
+    tokens = [t.strip("«»\"'.,()-—:;") for t in raw.split() if t]
+    distinctive = [t for t in tokens if t and t not in _GENERIC_WORDS and len(t) >= 5]
+    # стем = первые 6 символов (грубо, но для русского работает: «бухгалтерские»→«бухгал»).
+    return list({t[:6] for t in distinctive})
+
+
+def _site_matches_category(text: str, keywords: list[str]) -> bool:
+    """True, если в тексте сайта встречается хоть один отличительный стем
+    категории. Если ключевых слов нет (категория размытая) — пропускаем сайт
+    как валидный (не блокируем без сигнала)."""
+    if not keywords:
+        return True
+    if not text:
+        return False
+    t = text.lower()
+    return any(k in t for k in keywords)
+
+
+def _city_from_region(region: str) -> str:
+    """«Витебск, Беларусь» → «Витебск». Берём первую часть до запятой."""
+    if not region:
+        return ""
+    return region.split(",")[0].strip()
 
 
 async def extract_brands_from_ai_responses(
@@ -411,12 +465,17 @@ async def extract_brands_from_ai_responses(
     async def _one(chunk: str) -> list[str]:
         prompt = (
             f"Ниже — ответы ИИ-ассистентов на запросы пользователей про «{category}» "
-            f"в регионе «{region}».\n"
-            f"Перечисли ТОЛЬКО названия КОНКРЕТНЫХ компаний/брендов, которые упомянуты "
-            f"как поставщики этой услуги/товара.\n"
-            f"НЕ включай: категории и родовые словосочетания («бухгалтерские услуги»), "
-            f"города, госорганы, маркетплейсы/агрегаторы, а также сам бренд «{brand_name}».\n"
-            f"Если конкретных компаний не названо — верни пустой массив [].\n\n"
+            f"в регионе «{region}».\n\n"
+            f"Перечисли ТОЛЬКО названия конкретных компаний/брендов, которые в этих "
+            f"ответах названы как РЕАЛЬНЫЕ ПРОВАЙДЕРЫ услуги «{category}» в «{region}».\n\n"
+            f"СТРОГО ИСКЛЮЧИ:\n"
+            f"- родовые словосочетания и категории («бухгалтерские услуги», «аудит»);\n"
+            f"- города, регионы, госорганы;\n"
+            f"- сущности, упомянутые мимоходом (примеры клиентов, контрагентов), —\n"
+            f"  если компания упомянута НЕ как поставщик «{category}», а в другом контексте,\n"
+            f"  её сюда НЕ включай;\n"
+            f"- сам бренд «{brand_name}».\n"
+            f"Если в ответах нет конкретных провайдеров «{category}» — верни [].\n\n"
             f"Ответы ИИ:\n{chunk}\n\n"
             f'Верни СТРОГО JSON-массив строк: ["Компания 1", "Компания 2"]. Только JSON.'
         )
@@ -476,17 +535,42 @@ async def build_competitor_list(
         logger.info("competitors_from_client_only", count=len(client_list), brand=brand_name)
         return client_list[:count], "client"
 
-    # Источник А — реально упомянутые ИИ бренды, верифицированные живым сайтом.
+    # Источник А — реально упомянутые ИИ бренды, верифицированные живым сайтом
+    # И проверкой, что сайт реально про ту же услугу (Задача 4 entity disambiguation).
+    from app.core.site_analyzer import fetch_site_summary, looks_generic_name
     ai_names = await extract_brands_from_ai_responses(raw_responses, brand_name, niche)
     ai_verified: list[str] = []
     if ai_names:
         urls = await asyncio.gather(
             *[find_competitor_url(n, region) for n in ai_names], return_exceptions=True
         )
-        for n, u in zip(ai_names, urls):
-            if isinstance(u, str) and u:
-                ai_verified.append(n)
-        logger.info("competitors_from_ai_verified", candidates=len(ai_names), verified=len(ai_verified))
+        keywords = _category_keywords(niche)
+        # Параллельно подтягиваем сводки сайтов найденных кандидатов.
+        valid_pairs = [(n, u) for n, u in zip(ai_names, urls) if isinstance(u, str) and u]
+        summaries = await asyncio.gather(
+            *[fetch_site_summary(u) for _, u in valid_pairs], return_exceptions=True
+        )
+        rejected_off_topic = 0
+        for (orig_name, _u), summ in zip(valid_pairs, summaries):
+            if not isinstance(summ, dict):
+                continue
+            text = summ.get("text") or ""
+            if not _site_matches_category(text, keywords):
+                # Сайт есть, но он не про эту услугу — это не конкурент
+                # (адаптивно: «Т-Банк» отвалится для бухгалтерии, но не для банков).
+                rejected_off_topic += 1
+                continue
+            # Если у сайта нашлось НАСТОЯЩЕЕ название — берём его, не имя от ИИ.
+            site_name = (summ.get("org_name") or "").strip()
+            final_name = site_name if site_name and not looks_generic_name(site_name) else orig_name
+            ai_verified.append(final_name)
+        logger.info(
+            "competitors_from_ai_verified",
+            candidates=len(ai_names),
+            with_url=len(valid_pairs),
+            verified=len(ai_verified),
+            rejected_off_topic=rejected_off_topic,
+        )
 
     # Источник Б — реальная поисковая выдача (без уже учтённых).
     exclude = [brand_name] + client_list + ai_verified
