@@ -28,6 +28,7 @@ from app.db.repositories.report_repo import (
     attach_email_to_report,
     count_reports_since,
     create_report,
+    find_active_report_by_domain,
     find_recent_report_by_domain,
     get_report,
     get_report_by_token,
@@ -118,6 +119,20 @@ async def start_check(
             report_id=existing.id,
             status="completed",
             message="Свежий отчёт по этому сайту уже готов — отправили его на ваш email.",
+            email=mask_email(email_str),
+        )
+
+    # 5.1. Дедуп «в работе» (Итерация-2, Б4): тот же домен уже генерируется прямо
+    # сейчас — не плодим второй pipeline, отдаём клиенту тот же отчёт (он увидит
+    # статус генерации в браузере). Защита от гонки двух заявок на один домен.
+    active = await find_active_report_by_domain(db, domain_normalized, now - timedelta(hours=2))
+    if active:
+        await attach_email_to_report(db, active.id, email_str)
+        logger.info("report_dedup_inflight", domain=domain_normalized, report_id=str(active.id), status=active.status)
+        return CheckResponse(
+            report_id=active.id,
+            status=active.status,
+            message="По этому сайту уже идёт анализ — отчёт скоро будет готов.",
             email=mask_email(email_str),
         )
 

@@ -42,6 +42,65 @@ COLOR_WARNING  = "#D29A3C"
 COLOR_DANGER   = "#B93A3A"
 
 
+# Итерация-2, А1: каталог быстрых улучшений (Уровень 1) с привязкой к флагам
+# site_analyzer. Рекомендуем ТОЛЬКО то, чего у клиента реально нет.
+# (title, html-описание, ключ в client_site_analysis, особая проверка для expertise)
+_LEVEL1_CATALOG = [
+    ("has_faq_schema",
+     "Добавить FAQ-блок на главную страницу",
+     "минимум 8 вопросов с разметкой <code>schema.org/FAQPage</code>. "
+     "ИИ берёт такие блоки в первую очередь для прямых ответов."),
+    ("about_page_present",
+     "Добавить страницу «О компании»",
+     "с явным указанием опыта, лицензий, авторства и фактов о команде — "
+     "это основной источник фактов о бренде для ИИ-моделей."),
+    ("has_llms_txt",
+     "Создать файл <code>/llms.txt</code> в корне сайта",
+     "с описанием бизнеса в формате, удобном для языковых моделей. "
+     "Новый стандарт, мало у кого есть — для вас это явное преимущество."),
+    ("has_organization_schema",
+     "Добавить разметку организации (<code>schema.org/Organization</code>)",
+     "чтобы ИИ корректно считывал факты о компании: название, регион, специализацию."),
+    ("structured_headings",
+     "Выстроить чёткую иерархию заголовков h1→h2→h3",
+     "модели режут страницу на смысловые блоки по заголовкам — без иерархии "
+     "контент для них «слипается»."),
+    ("expertise_signals",
+     "Усилить сигналы экспертизы на сайте",
+     "опыт, годы на рынке, лицензии, состав команды. ИИ избегает рекомендовать "
+     "бренды без подтверждённой экспертизы."),
+]
+
+
+def _build_level1_actions(client_site_analysis: dict) -> dict:
+    """Уровень 1 плана действий — динамически из анализа сайта (А1).
+
+    Возвращает {actions: [...], analyzed: bool, all_present: bool}.
+    Рекомендуем только отсутствующие пункты. Если сайт не спарсился — даём
+    общий набор (analyzed=False), чтобы план не был пустым.
+    """
+    analyzed = bool(client_site_analysis and client_site_analysis.get("fetched"))
+    if not analyzed:
+        # Не смогли проанализировать — общий набор быстрых улучшений.
+        actions = [
+            {"title": t, "desc": d}
+            for key, t, d in _LEVEL1_CATALOG
+            if key in ("has_faq_schema", "about_page_present", "has_llms_txt")
+        ]
+        return {"actions": actions, "analyzed": False, "all_present": False}
+
+    actions = []
+    for key, title, desc in _LEVEL1_CATALOG:
+        if key == "expertise_signals":
+            present = int(client_site_analysis.get("expertise_signals", 0) or 0) >= 3
+        else:
+            present = bool(client_site_analysis.get(key))
+        if not present:
+            actions.append({"title": title, "desc": desc})
+
+    return {"actions": actions, "analyzed": True, "all_present": len(actions) == 0}
+
+
 def _score_color(score: int) -> str:
     if score >= 60:
         return COLOR_SUCCESS
@@ -272,6 +331,28 @@ async def build_and_upload_pdf(report, analysis: Analysis, competitors: list[str
     else:
         cover_verdict = "Вы в игре — есть куда расти."
 
+    # ===== Итерация-2, А2: «ниша свободна» vs «догони лидера» =====
+    competitor_presences = [c.get("presence_rate", 0) for c in comparison if not c.get("is_client")]
+    max_competitor_presence = max(competitor_presences) if competitor_presences else 0
+    niche_is_open = max_competitor_presence < settings.NICHE_OPEN_PRESENCE_MAX
+    niche_has_strong_leader = max_competitor_presence > settings.NICHE_STRONG_LEADER_PRESENCE
+    _total_p = analysis.total_prompts or 0
+    leader_presence_count = round(max_competitor_presence / 100 * _total_p) if _total_p else 0
+    niche_label = (niche.get("subcategory") or niche.get("category") or "вашей нише").strip()
+
+    # ===== Итерация-2, А1: динамический Уровень 1 плана действий =====
+    level1 = _build_level1_actions(report.client_site_analysis or {})
+
+    # ===== Итерация-2, Б2: цены в валюте региона =====
+    region_l = (report.region or "").lower()
+    is_belarus = "беларус" in region_l or "рб" == region_l.strip() or region_l.endswith(", рб")
+    if is_belarus:
+        price_dorabotka = f"от {settings.PACKAGE_DORABOTKA_PRICE_FROM_BYN} BYN"
+        price_full_site = f"от {settings.PACKAGE_FULL_SITE_PRICE_FROM_BYN} BYN"
+    else:
+        price_dorabotka = f"от {settings.PACKAGE_DORABOTKA_PRICE_FROM} ₽"
+        price_full_site = f"от {settings.PACKAGE_FULL_SITE_PRICE_FROM} ₽"
+
     context = {
         # Основные данные
         "report": report,
@@ -289,6 +370,20 @@ async def build_and_upload_pdf(report, analysis: Analysis, competitors: list[str
         "prompts": report.prompts or [],  # список 10 промптов для методологии
         "recommendations": report.recommendations or [],
         "expert_note": report.expert_note,
+
+        # Итерация-2 А2: ветка страницы 6 («ниша свободна» / «догони лидера»)
+        "niche_is_open": niche_is_open,
+        "niche_has_strong_leader": niche_has_strong_leader,
+        "max_competitor_presence": max_competitor_presence,
+        "leader_presence_count": leader_presence_count,
+        "niche_label": niche_label,
+        # Итерация-2 А1: динамический Уровень 1 плана действий
+        "level1_actions": level1["actions"],
+        "level1_analyzed": level1["analyzed"],
+        "level1_all_present": level1["all_present"],
+        # Итерация-2 Б2: цены в валюте региона
+        "price_dorabotka": price_dorabotka,
+        "price_full_site": price_full_site,
 
         # Этап 2 ТЗ — данные site_analyzer и gap_analyzer
         "client_site_analysis": report.client_site_analysis or {},
@@ -339,10 +434,6 @@ async def build_and_upload_pdf(report, analysis: Analysis, competitors: list[str
         "BOOKING_WIDGET_URL": (
             f"{settings.STUDIO_FULL_URL}/zapis-na-razgovor"
             f"?report_id={report.id}&utm_source=ai_report&utm_campaign=cta_call"
-        ),
-        "CHECKLIST_URL": (
-            f"{settings.STUDIO_FULL_URL}/checklist"
-            f"?report_id={report.id}&utm_source=ai_report&utm_campaign=cta_checklist"
         ),
 
         # Статистика анализа (для шаблонов)

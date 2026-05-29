@@ -1,4 +1,5 @@
 import json
+import re
 import xml.etree.ElementTree as ET
 from typing import Any, Optional
 from urllib.parse import urlparse

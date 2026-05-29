@@ -11,23 +11,32 @@
     <div class="level-num">1</div>
     <div class="level-body">
       <p class="level-title">Что можно сделать самостоятельно за неделю</p>
-      <p class="level-sub">Базовые улучшения, которые повышают видимость, но не закрывают главный разрыв с лидером.</p>
+      {# Итерация-2 А1: список генерируется из анализа сайта (site_analyzer).
+         Рекомендуем ТОЛЬКО то, чего у клиента реально нет — иначе отчёт советует
+         сделать уже сделанное и теряет доверие. #}
+      {% if level1_all_present %}
+      <p class="level-sub">Базовая техническая основа у вас уже заложена.</p>
       <ul class="level-list">
         <li>
-          <strong>Добавить FAQ-блок на главную страницу</strong> — минимум 8 вопросов
-          с разметкой <code>schema.org/FAQPage</code>. ИИ берёт такие блоки в первую очередь.
+          <strong>Быстрых технических побед почти не осталось — и это хорошо.</strong>
+          На вашем сайте уже есть основные сигналы готовности к ИИ-цитированию
+          (разметка, структура, страница о компании). Это редкость.
         </li>
         <li>
-          <strong>Создать файл <code>/llms.txt</code> в корне сайта</strong> с описанием
-          бизнеса в формате, удобном для языковых моделей. Это новый стандарт, мало кто
-          его пока имеет — для вас это явное преимущество.
-        </li>
-        <li>
-          <strong>Добавить страницу «О компании»</strong> с явным указанием опыта,
-          лицензий, авторства, фактов о команде. Это основной источник для ИИ-моделей
-          о бренде.
+          <strong>Основной потенциал роста — в структурной работе (Уровень 2):</strong>
+          перестройка контента под промпт-кластеры ниши и наращивание упоминаний
+          на внешних площадках. Технические галочки уже не двигают результат —
+          двигает структура и доверие.
         </li>
       </ul>
+      {% else %}
+      <p class="level-sub">Базовые улучшения именно для вашего сайта — то, чего на нём сейчас нет (по результатам анализа со страницы 6).</p>
+      <ul class="level-list">
+        {% for a in level1_actions %}
+        <li><strong>{{ a.title }}</strong> — {{ a.desc | safe }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
     </div>
   </div>
 
@@ -72,7 +81,7 @@
       <div class="package">
         <div class="package-head">
           <span class="package-name">Пакет «GEO-Доработка»</span>
-          <span class="package-price">от {{ PACKAGE_DORABOTKA_PRICE_FROM }} ₽</span>
+          <span class="package-price">{{ price_dorabotka }}</span>
         </div>
         <p class="package-for">
           <strong>Для кого:</strong> ваш текущий сайт технически в порядке (современный движок,
@@ -94,7 +103,7 @@
       <div class="package">
         <div class="package-head">
           <span class="package-name">Пакет «GEO-Сайт под ключ»</span>
-          <span class="package-price">от {{ PACKAGE_FULL_SITE_PRICE_FROM }} ₽</span>
+          <span class="package-price">{{ price_full_site }}</span>
         </div>
         <p class="package-for">
           <strong>Для кого:</strong> ваш текущий сайт устарел технически или морально —

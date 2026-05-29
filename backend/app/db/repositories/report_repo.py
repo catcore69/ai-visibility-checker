@@ -91,6 +91,66 @@ async def find_recent_report_by_domain(
     return result.scalar_one_or_none()
 
 
+async def find_reusable_report_by_domain(
+    db: AsyncSession,
+    domain: str,
+    not_older_than: datetime,
+    exclude_id: Optional[UUID] = None,
+):
+    """Итерация-2, Б1: недавний ЗАВЕРШЁННЫЙ отчёт того же домена с нишей+конкурентами.
+
+    Используется для воспроизводимости: повторный анализ домена берёт ту же нишу
+    и тех же конкурентов (детерминированность мониторинга динамики). В отличие от
+    дедупа (REPORT_REUSE_DAYS) — окно шире (NICHE_REUSE_DAYS), и мы НЕ отдаём старый
+    отчёт, а только переиспользуем его структуру для свежего прогона моделей.
+    """
+    if not domain:
+        return None
+    stmt = (
+        select(Report)
+        .where(
+            Report.domain_normalized == domain,
+            Report.status == "completed",
+            Report.created_at >= not_older_than,
+            Report.niche_data.isnot(None),
+        )
+        .order_by(Report.created_at.desc())
+        .limit(1)
+    )
+    if exclude_id is not None:
+        stmt = stmt.where(Report.id != exclude_id)
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+async def find_active_report_by_domain(
+    db: AsyncSession,
+    domain: str,
+    not_older_than: datetime,
+):
+    """Итерация-2, Б4: отчёт того же домена, который ПРЯМО СЕЙЧАС генерируется.
+
+    Закрывает гонку: клиент A верифицировал и pipeline бежит, клиент B вводит
+    тот же домен — completed-дедуп его не ловит (отчёт ещё не completed), и
+    запускается ВТОРОЙ дорогой pipeline. Здесь ловим «в работе» статусы
+    (верифицированные и обрабатываемые), кроме completed/failed/pending_verification.
+    Окно короткое: pipeline идёт минуты, «застрявший» >N часов считаем мёртвым.
+    """
+    if not domain:
+        return None
+    result = await db.execute(
+        select(Report)
+        .where(
+            Report.domain_normalized == domain,
+            Report.status.notin_(["completed", "failed", "pending_verification"]),
+            Report.created_at >= not_older_than,
+        )
+        .order_by(Report.created_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
 async def count_reports_since(
     db: AsyncSession,
     since: datetime,

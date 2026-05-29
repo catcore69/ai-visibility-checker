@@ -140,6 +140,125 @@ def _walk_schema(node: Any, out: dict[str, bool]) -> None:
             _walk_schema(item, out)
 
 
+# Слова-маркеры generic-описаний (НЕ названия компаний, а SEO-фразы из <title>).
+# Если «название» содержит такое и не имеет собственного имени — считаем generic.
+_GENERIC_NAME_MARKERS = [
+    "услуг", "аутсорсинг", "аутсорс", "бухгалтери", "консалтинг", "сопровожден",
+    "под ключ", "для бизнеса", "в витебске", "в минске", "в москве", "в спб",
+    "цены", "недорого", "официальный сайт", "каталог", "интернет-магазин",
+    "доставка", "ремонт", "купить", "заказать",
+]
+# Маркеры собственного юр.названия — если есть, имя НЕ generic.
+_LEGAL_NAME_RE = re.compile(
+    r'(ООО|ОДО|ЗАО|ОАО|ЧУП|ЧТУП|УП|ИП|ПАО|АО)\s*[«"\']?\s*([A-ZА-ЯЁ][\w\-\s«»"\']{1,40})',
+    re.UNICODE,
+)
+
+
+def looks_generic_name(name: str) -> bool:
+    """True, если «название» похоже на SEO-фразу/описание услуги, а не на бренд.
+
+    Используется и в competitor_finder/pipeline для решения «переименовать ли».
+    """
+    s = (name or "").strip().lower()
+    if not s:
+        return True
+    # Юр.форма в начале — это уже конкретное название.
+    if re.match(r"^(ооо|одо|зао|оао|чуп|чтуп|уп|ип|пао|ао)\b", s):
+        return False
+    # Слишком длинная фраза из нескольких слов с маркерами — описание.
+    has_marker = any(m in s for m in _GENERIC_NAME_MARKERS)
+    word_count = len(s.split())
+    if has_marker and word_count >= 2:
+        return True
+    return False
+
+
+def _org_name_from_jsonld(soup: BeautifulSoup) -> Optional[str]:
+    """Достаёт name из schema.org Organization/LocalBusiness в JSON-LD."""
+    org_types = {
+        "Organization", "LocalBusiness", "Corporation", "ProfessionalService",
+        "AccountingService", "Store", "LegalService", "NGO",
+    }
+
+    def _walk(node: Any) -> Optional[str]:
+        if isinstance(node, dict):
+            t = node.get("@type")
+            types = [t] if isinstance(t, str) else (t if isinstance(t, list) else [])
+            if any(tt in org_types for tt in types):
+                name = node.get("name") or node.get("legalName")
+                if isinstance(name, str) and name.strip():
+                    return name.strip()
+            for v in node.values():
+                found = _walk(v)
+                if found:
+                    return found
+        elif isinstance(node, list):
+            for item in node:
+                found = _walk(item)
+                if found:
+                    return found
+        return None
+
+    for tag in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        try:
+            raw = tag.string or tag.get_text() or ""
+            if not raw.strip():
+                continue
+            data = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        name = _walk(data)
+        if name:
+            return name
+    return None
+
+
+def _extract_org_name(soup: BeautifulSoup, url: str) -> Optional[str]:
+    """Реальное название компании по приоритету источников (Итерация-2, А3).
+
+    1. schema.org Organization → name
+    2. og:site_name
+    3. logo alt / название в шапке
+    4. юр.название из подвала (ООО «…», ЧУП «…»)
+    НЕ используем <title> — это источник SEO-фраз, а не брендов.
+    Возвращает None, если ничего конкретного не нашли (caller оставит исходное/домен).
+    """
+    # 1. schema.org Organization
+    name = _org_name_from_jsonld(soup)
+    if name and not looks_generic_name(name):
+        return name[:80]
+
+    # 2. og:site_name
+    og = soup.find("meta", attrs={"property": "og:site_name"})
+    if og and og.get("content"):
+        cand = og["content"].strip()
+        if cand and not looks_generic_name(cand):
+            return cand[:80]
+
+    # 3. logo alt в шапке
+    header = soup.find("header") or soup
+    for img in header.find_all("img"):
+        alt = (img.get("alt") or "").strip()
+        cls = " ".join(img.get("class") or []).lower()
+        if alt and ("logo" in cls or "logo" in (img.get("id") or "").lower() or "лого" in alt.lower() or "logo" in alt.lower()):
+            cand = re.sub(r"(?i)\b(логотип|logo|лого)\b", "", alt).strip(" -—|")
+            if cand and not looks_generic_name(cand):
+                return cand[:80]
+
+    # 4. юр.название из подвала
+    footer = soup.find("footer")
+    footer_text = (footer.get_text(" ", strip=True) if footer else soup.get_text(" ", strip=True))[:3000]
+    m = _LEGAL_NAME_RE.search(footer_text)
+    if m:
+        legal = (m.group(1) + " " + m.group(2)).strip()
+        legal = re.sub(r"\s+", " ", legal)[:80]
+        if legal:
+            return legal
+
+    return None
+
+
 def _detect_faq_block(soup: BeautifulSoup) -> bool:
     """Грубо: есть ли блок с вопросами-ответами без schema-разметки."""
     # Ищем секции/детали с вопросительными заголовками
@@ -194,6 +313,7 @@ def _empty_result(url: str, reason: str) -> dict:
         "url": url,
         "fetched": False,
         "fetch_error": reason,
+        "org_name": None,
         "has_llms_txt": False,
         "has_robots_txt": False,
         "has_sitemap": False,
@@ -285,6 +405,7 @@ async def analyze_site(url: str) -> dict:
             "url": url,
             "fetched": True,
             "fetch_error": None,
+            "org_name": _extract_org_name(soup, url),
             "has_llms_txt": has_llms,
             "has_robots_txt": has_robots,
             "robots_allows_ai": _robots_allows_ai(robots_text) if robots_text else {},

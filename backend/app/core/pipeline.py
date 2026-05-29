@@ -127,63 +127,102 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
 
         await update_report_status(db, report_id, "niche_detection", progress=5)
 
-        # ШАГ 2а (Задача 4): РЕГИОН из жёстких сигналов сайта, а не из формы.
-        # Форма больше не диктует регион (там был дефолт «Россия» — корень багов).
-        from app.core.region_detector import detect_region
-        region_info, site_text = await detect_region(report.url)
-        detected_region = region_info.get("region") or ""  # "" если unknown
-        # Если детектор уверенно определил регион — используем его как основной.
-        effective_region = detected_region or report.region or ""
+        # ===== Итерация-2, Б1: воспроизводимость =====
+        # Если за NICHE_REUSE_DAYS уже был завершённый отчёт по этому домену —
+        # берём из него нишу, регион и конкурентов. Тогда повторный анализ даёт
+        # ТЕ ЖЕ нишу/запросы/конкурентов (запросы — из кеша по niche_key), а
+        # меняются только свежие ответы моделей (это и есть «динамика»).
+        from datetime import datetime, timedelta
+        from app.db.repositories.report_repo import find_reusable_report_by_domain
+        reused = None
+        try:
+            reuse_since = datetime.utcnow() - timedelta(days=settings.NICHE_REUSE_DAYS)
+            reused = await find_reusable_report_by_domain(
+                db, report.domain_normalized, reuse_since, exclude_id=report_id
+            )
+        except Exception as exc:
+            logger.warning("niche_reuse_lookup_failed", error=str(exc))
 
-        # ШАГ 2б: Ниша — по РЕАЛЬНОМУ контенту сайта + определённому региону.
-        user_hint = None
-        if isinstance(report.niche_data, dict):
-            user_hint = report.niche_data.get("user_hint")
-        niche = await detect_niche(
-            report.url,
-            report.brand_name,
-            effective_region,
-            user_hint=user_hint,
-            site_text=site_text,
-        )
-        # Кладём в niche итоговый регион + сигналы (для прозрачности/отладки).
-        niche["region_detection"] = {
-            "country": region_info.get("country"),
-            "city": region_info.get("city"),
-            "confidence": region_info.get("confidence"),
-        }
-        # Задача 5.1: бренд определён парсингом — обновляем имя бренда отчёта,
-        # если форма прислала только URL-плейсхолдер.
-        detected_brand = (niche.get("brand") or "").strip()
-        effective_brand = detected_brand or report.brand_name
-        await update_report_field(
-            db, report_id,
-            niche_data=niche,
-            brand_name=effective_brand,
-            region=niche.get("region") or effective_region or report.region,
-        )
-        # Освежаем объект, чтобы дальше использовать новый бренд.
-        report = await get_report(db, report_id)
-        await update_report_status(db, report_id, "competitor_discovery", progress=15)
+        if reused and isinstance(reused.niche_data, dict) and reused.competitors:
+            niche = dict(reused.niche_data)
+            effective_brand = reused.brand_name or report.brand_name
+            effective_region = niche.get("region") or report.region or ""
+            competitors = list(reused.competitors)
+            competitors_source = reused.competitors_source or "reused"
+            await update_report_field(
+                db, report_id,
+                niche_data=niche,
+                brand_name=effective_brand,
+                region=niche.get("region") or report.region,
+                competitors=competitors,
+                competitors_source=competitors_source,
+            )
+            report = await get_report(db, report_id)
+            logger.info(
+                "niche_competitors_reused",
+                domain=report.domain_normalized,
+                source_report=str(reused.id),
+                competitors=len(competitors),
+            )
+            await update_report_status(db, report_id, "competitor_discovery", progress=15)
+        else:
+            # ШАГ 2а (Задача 4): РЕГИОН из жёстких сигналов сайта, а не из формы.
+            # Форма больше не диктует регион (там был дефолт «Россия» — корень багов).
+            from app.core.region_detector import detect_region
+            region_info, site_text = await detect_region(report.url)
+            detected_region = region_info.get("region") or ""  # "" если unknown
+            # Если детектор уверенно определил регион — используем его как основной.
+            effective_region = detected_region or report.region or ""
 
-        # ШАГ 3: Конкуренты (Этап 1.1 ТЗ — учитываем указанных клиентом).
-        client_competitors = (
-            list(report.client_competitors)
-            if isinstance(report.client_competitors, list)
-            else None
-        )
-        competitors, competitors_source = await find_competitors(
-            niche,
-            brand_name=report.brand_name,
-            count=settings.COMPETITORS_PER_REPORT,
-            client_competitors=client_competitors,
-        )
-        await update_report_field(
-            db,
-            report_id,
-            competitors=competitors,
-            competitors_source=competitors_source,
-        )
+            # ШАГ 2б: Ниша — по РЕАЛЬНОМУ контенту сайта + определённому региону.
+            user_hint = None
+            if isinstance(report.niche_data, dict):
+                user_hint = report.niche_data.get("user_hint")
+            niche = await detect_niche(
+                report.url,
+                report.brand_name,
+                effective_region,
+                user_hint=user_hint,
+                site_text=site_text,
+            )
+            # Кладём в niche итоговый регион + сигналы (для прозрачности/отладки).
+            niche["region_detection"] = {
+                "country": region_info.get("country"),
+                "city": region_info.get("city"),
+                "confidence": region_info.get("confidence"),
+            }
+            # Задача 5.1: бренд определён парсингом — обновляем имя бренда отчёта,
+            # если форма прислала только URL-плейсхолдер.
+            detected_brand = (niche.get("brand") or "").strip()
+            effective_brand = detected_brand or report.brand_name
+            await update_report_field(
+                db, report_id,
+                niche_data=niche,
+                brand_name=effective_brand,
+                region=niche.get("region") or effective_region or report.region,
+            )
+            # Освежаем объект, чтобы дальше использовать новый бренд.
+            report = await get_report(db, report_id)
+            await update_report_status(db, report_id, "competitor_discovery", progress=15)
+
+            # ШАГ 3: Конкуренты (Этап 1.1 ТЗ — учитываем указанных клиентом).
+            client_competitors = (
+                list(report.client_competitors)
+                if isinstance(report.client_competitors, list)
+                else None
+            )
+            competitors, competitors_source = await find_competitors(
+                niche,
+                brand_name=report.brand_name,
+                count=settings.COMPETITORS_PER_REPORT,
+                client_competitors=client_competitors,
+            )
+            await update_report_field(
+                db,
+                report_id,
+                competitors=competitors,
+                competitors_source=competitors_source,
+            )
 
         # ШАГ 3.5: Анализ сайтов клиента и конкурентов (Этап 2 ТЗ).
         # Делаем параллельно, исключения внутри analyze_site не роняют pipeline.
@@ -212,11 +251,43 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
                 else None
             )
             competitors_site_analysis = []
-            for res in site_results[1:]:
+            # Итерация-2, А3: меняем generic-«названия» конкурентов (SEO-фразы
+            # из выдачи) на РЕАЛЬНЫЕ названия компаний, извлечённые с их сайтов.
+            from app.core.site_analyzer import looks_generic_name
+            name_remap: dict[str, str] = {}
+            client_brand_l = (report.brand_name or "").strip().lower()
+            for (orig_name, _url), res in zip(sites_to_analyse, site_results[1:]):
                 if isinstance(res, Exception):
                     logger.warning("site_analyze_one_failed", error=str(res))
                     continue
                 competitors_site_analysis.append(res)
+                org_name = (res.get("org_name") or "").strip() if isinstance(res, dict) else ""
+                # Переименовываем, если нашли конкретное имя и оно лучше исходного:
+                # исходное generic, либо отличается и само не generic.
+                if (
+                    org_name
+                    and not looks_generic_name(org_name)
+                    and org_name.lower() != orig_name.lower()
+                    and org_name.lower() != client_brand_l
+                    and (looks_generic_name(orig_name) or len(org_name) <= len(orig_name) + 4)
+                ):
+                    name_remap[orig_name] = org_name
+
+            if name_remap:
+                # Применяем к списку конкурентов и к competitor_urls, дедуп по имени.
+                seen_l: set[str] = set()
+                renamed: list[str] = []
+                for c in (competitors or []):
+                    new = name_remap.get(c, c)
+                    if new.lower() in seen_l or new.lower() == client_brand_l:
+                        continue
+                    seen_l.add(new.lower())
+                    renamed.append(new)
+                competitors = renamed
+                for cu in competitor_urls:
+                    cu["name"] = name_remap.get(cu.get("name"), cu.get("name"))
+                await update_report_field(db, report_id, competitors=competitors)
+                logger.info("competitors_renamed_from_sites", remap=name_remap)
 
             # Лидер по SoV — определим позже, пока передаём None,
             # gap_analyzer возьмёт первого с fetched=True.
