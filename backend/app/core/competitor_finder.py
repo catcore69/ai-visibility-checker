@@ -199,6 +199,64 @@ def _merge_dedupe(client_list: list[str], llm_list: list[str], target: int) -> l
     return out
 
 
+def _client_country(region: str) -> str:
+    """Страна клиента из строки region («Витебск, Беларусь» → «Беларусь»)."""
+    r = (region or "").lower()
+    if "беларус" in r or r.strip() in ("рб", "by") or r.endswith(", рб"):
+        return "Беларусь"
+    if "росси" in r or r.strip() in ("рф", "ru") or r.endswith(", рф"):
+        return "Россия"
+    if "казахст" in r or "kz" in r:
+        return "Казахстан"
+    if "украин" in r or "ua" in r:
+        return "Украина"
+    return ""
+
+
+async def _xmlriver_google_results(query: str, region: str = "Россия", num: int = 20) -> list[dict]:
+    """Google-выдача через XMLRiver (`/search_google/xml`). Итерация-3: для
+    Беларуси Google даёт реальные витебские фирмы, Яндекс беднее. Если эндпоинт
+    не отвечает / параметры не приняты — возвращает [], не ломает Yandex-путь.
+    """
+    if not settings.XMLRIVER_USER or not settings.XMLRIVER_KEY:
+        return []
+    lr = (
+        settings.XMLRIVER_REGION_BY
+        if ("беларус" in region.lower() or "by" in region.lower())
+        else settings.XMLRIVER_REGION_RU
+    )
+    try:
+        async with httpx.AsyncClient(timeout=25.0) as client:
+            response = await client.get(
+                "https://xmlriver.com/search_google/xml",
+                params={
+                    "user": settings.XMLRIVER_USER,
+                    "key": settings.XMLRIVER_KEY,
+                    "query": query,
+                    "groupby": str(num),
+                    "country": lr,
+                },
+            )
+            response.raise_for_status()
+    except Exception as exc:
+        logger.warning("serp_google_error", query=query, error=str(exc))
+        return []
+
+    out: list[dict] = []
+    try:
+        root = ET.fromstring(response.text)
+        for doc in root.findall(".//doc"):
+            url_el = doc.find("url")
+            title_el = doc.find("title")
+            url = (url_el.text or "").strip() if url_el is not None else ""
+            title = (title_el.text or "").strip() if title_el is not None else ""
+            if url:
+                out.append({"title": title, "url": url, "domain": _domain_of(url), "source": "google"})
+    except ET.ParseError as exc:
+        logger.warning("serp_google_parse_error", query=query, error=str(exc))
+    return out
+
+
 async def _xmlriver_search_results(query: str, region: str = "Россия", num: int = 20) -> list[dict]:
     """Сырые результаты поисковой выдачи через XMLRiver: [{title, url, domain}]."""
     if not settings.XMLRIVER_USER or not settings.XMLRIVER_KEY:
@@ -235,9 +293,40 @@ async def _xmlriver_search_results(query: str, region: str = "Россия", num
             title = (title_el.text or "").strip() if title_el is not None else ""
             if not url:
                 continue
-            out.append({"title": title, "url": url, "domain": _domain_of(url)})
+            out.append({"title": title, "url": url, "domain": _domain_of(url), "source": "yandex"})
     except ET.ParseError as exc:
         logger.warning("serp_parse_error", query=query, error=str(exc))
+    return out
+
+
+async def _xmlriver_search_combined(query: str, region: str = "Россия", num: int = 20) -> list[dict]:
+    """Итерация-3: Google как основной источник (для РБ даёт больше реальных
+    фирм) + Yandex как fallback. Параллельно опрашиваем оба, объединяем,
+    дедупим по URL. Google идёт первым в порядке (более релевантный).
+    """
+    g, y = await asyncio.gather(
+        _xmlriver_google_results(query, region, num),
+        _xmlriver_search_results(query, region, num),
+        return_exceptions=True,
+    )
+    out: list[dict] = []
+    seen: set[str] = set()
+    for src in (g, y):
+        if not isinstance(src, list):
+            continue
+        for r in src:
+            u = r.get("url") or ""
+            if not u or u in seen:
+                continue
+            seen.add(u)
+            out.append(r)
+    logger.info(
+        "serp_combined",
+        query=query,
+        google=len(g) if isinstance(g, list) else 0,
+        yandex=len(y) if isinstance(y, list) else 0,
+        merged=len(out),
+    )
     return out
 
 
@@ -316,8 +405,12 @@ async def _find_competitors_via_serp(
     компании С САМОГО САЙТА (schema.org/og:site_name/подвал) — НЕ из <title>
     (там SEO-фразы). Сайт не открылся / название не извлеклось → не конкурент.
     """
-    from app.core.site_analyzer import fetch_site_summary, looks_generic_name
-    from app.utils.url_normalizer import extract_brand_from_url
+    from app.core.site_analyzer import (
+        fetch_site_summary,
+        looks_generic_name,
+        is_placeholder_name,
+        country_from_site,
+    )
 
     category = niche.get("category", "")
     region = niche.get("region", "")
@@ -328,9 +421,10 @@ async def _find_competitors_via_serp(
     if not query:
         return []
 
-    results = await _xmlriver_search_results(query, region=region, num=20)
+    # Итерация-3: Google как основной источник + Yandex как fallback.
+    results = await _xmlriver_search_combined(query, region=region, num=20)
 
-    # Уникальные реальные домены (без агрегаторов/соцсетей), сохраняем порядок выдачи.
+    # Уникальные реальные домены (без агрегаторов/соцсетей), сохраняем порядок.
     seen_domains: set[str] = set()
     real_urls: list[str] = []
     for r in results:
@@ -339,42 +433,58 @@ async def _find_competitors_via_serp(
             continue
         seen_domains.add(d)
         real_urls.append(r["url"])
-    real_urls = real_urls[: max(count * 3, 12)]  # запас на отсев по категории
+    real_urls = real_urls[: max(count * 4, 15)]  # запас на отсев по категории/региону
     if not real_urls:
         logger.info("competitors_from_serp", query=query, real_domains=0, found=0)
         return []
 
-    # Параллельно заходим на каждый сайт: имя + кусок текста для проверки категории.
+    # Параллельно заходим на каждый сайт: имя + кусок текста для проверок.
     summaries = await asyncio.gather(
         *[fetch_site_summary(u) for u in real_urls], return_exceptions=True
     )
     keywords = _category_keywords(niche)
+    client_country = _client_country(region)
 
     excl_lower = {e.strip().lower() for e in exclude if e}
     out: list[str] = []
     seen_names: set[str] = set()
-    rejected_off_topic = 0
+    rej_off_topic = 0
+    rej_wrong_country = 0
+    rej_no_name = 0
+    rej_generic = 0
     for u, summ in zip(real_urls, summaries):
         if not isinstance(summ, dict):
             continue
-        org_name = (summ.get("org_name") or "").strip()
         text = summ.get("text") or ""
+        org_name = (summ.get("org_name") or "").strip()
 
-        # Итер-3, Задача 4: entity disambiguation — сайт должен быть про ту же услугу.
-        # Это адаптивная защита от «Дом Книги»/«Т-Банк» в бухгалтерской нише
-        # (и наоборот не сломает банковскую нишу — там стем будет «банков»).
+        # Конъюнктивный confidence-фильтр (Итер-3, Задача 4):
+        # сайт + НАСТОЯЩЕЕ имя + регион + категория. Не прошёл хоть одно → не конкурент.
+
+        # 1. Реальное имя обязательно. БЕЗ fallback на slug домена (был «Vitebsk»).
+        if not org_name:
+            rej_no_name += 1
+            continue
+        # 2. Имя не должно быть generic/плейсхолдером
+        if looks_generic_name(org_name) or is_placeholder_name(org_name):
+            rej_generic += 1
+            continue
+        # 3. Регион сайта должен совпадать с клиентским (закрывает тёзок из РФ)
+        if client_country:
+            site_country = country_from_site(u, text)
+            if site_country and site_country != client_country:
+                rej_wrong_country += 1
+                continue
+        # 4. Категория сайта должна совпадать с услугой клиента (Т-Банк → ✗)
         if not _site_matches_category(text, keywords):
-            rejected_off_topic += 1
+            rej_off_topic += 1
             continue
 
-        name = org_name if org_name else extract_brand_from_url(u)
-        if not name or looks_generic_name(name):
-            continue
-        nl = name.lower()
+        nl = org_name.lower()
         if nl in excl_lower or nl in seen_names:
             continue
         seen_names.add(nl)
-        out.append(name)
+        out.append(org_name)
         if len(out) >= count:
             break
 
@@ -383,8 +493,12 @@ async def _find_competitors_via_serp(
         query=query,
         real_domains=len(real_urls),
         found=len(out),
-        rejected_off_topic=rejected_off_topic,
+        rej_no_name=rej_no_name,
+        rej_generic=rej_generic,
+        rej_wrong_country=rej_wrong_country,
+        rej_off_topic=rej_off_topic,
         keywords=keywords,
+        client_country=client_country,
     )
     return out
 
@@ -536,40 +650,63 @@ async def build_competitor_list(
         return client_list[:count], "client"
 
     # Источник А — реально упомянутые ИИ бренды, верифицированные живым сайтом
-    # И проверкой, что сайт реально про ту же услугу (Задача 4 entity disambiguation).
-    from app.core.site_analyzer import fetch_site_summary, looks_generic_name
+    # ПЛЮС жёсткие проверки: настоящее имя с сайта, не плейсхолдер, регион клиента,
+    # категория клиента. Все условия конъюнктивно (Итер-3, Задача 4).
+    from app.core.site_analyzer import (
+        fetch_site_summary,
+        looks_generic_name,
+        is_placeholder_name,
+        country_from_site,
+    )
     ai_names = await extract_brands_from_ai_responses(raw_responses, brand_name, niche)
     ai_verified: list[str] = []
     if ai_names:
+        # Сразу выкидываем плейсхолдеры до похода в SERP (не жжём запросы).
+        ai_names = [n for n in ai_names if not is_placeholder_name(n)]
         urls = await asyncio.gather(
             *[find_competitor_url(n, region) for n in ai_names], return_exceptions=True
         )
         keywords = _category_keywords(niche)
-        # Параллельно подтягиваем сводки сайтов найденных кандидатов.
+        client_country = _client_country(region)
         valid_pairs = [(n, u) for n, u in zip(ai_names, urls) if isinstance(u, str) and u]
         summaries = await asyncio.gather(
             *[fetch_site_summary(u) for _, u in valid_pairs], return_exceptions=True
         )
-        rejected_off_topic = 0
-        for (orig_name, _u), summ in zip(valid_pairs, summaries):
+        rej_no_name = rej_wrong_country = rej_off_topic = rej_generic = 0
+        for (orig_name, u), summ in zip(valid_pairs, summaries):
             if not isinstance(summ, dict):
                 continue
             text = summ.get("text") or ""
-            if not _site_matches_category(text, keywords):
-                # Сайт есть, но он не про эту услугу — это не конкурент
-                # (адаптивно: «Т-Банк» отвалится для бухгалтерии, но не для банков).
-                rejected_off_topic += 1
-                continue
-            # Если у сайта нашлось НАСТОЯЩЕЕ название — берём его, не имя от ИИ.
             site_name = (summ.get("org_name") or "").strip()
-            final_name = site_name if site_name and not looks_generic_name(site_name) else orig_name
-            ai_verified.append(final_name)
+
+            # 1. Настоящее имя с сайта — обязательно (без него кандидат подозрительный).
+            if not site_name:
+                rej_no_name += 1
+                continue
+            if looks_generic_name(site_name) or is_placeholder_name(site_name):
+                rej_generic += 1
+                continue
+            # 2. Страна сайта должна совпадать с клиентом.
+            if client_country:
+                site_country = country_from_site(u, text)
+                if site_country and site_country != client_country:
+                    rej_wrong_country += 1
+                    continue
+            # 3. Категория должна совпадать.
+            if not _site_matches_category(text, keywords):
+                rej_off_topic += 1
+                continue
+
+            ai_verified.append(site_name)
         logger.info(
             "competitors_from_ai_verified",
             candidates=len(ai_names),
             with_url=len(valid_pairs),
             verified=len(ai_verified),
-            rejected_off_topic=rejected_off_topic,
+            rej_no_name=rej_no_name,
+            rej_generic=rej_generic,
+            rej_wrong_country=rej_wrong_country,
+            rej_off_topic=rej_off_topic,
         )
 
     # Источник Б — реальная поисковая выдача (без уже учтённых).
