@@ -4,9 +4,78 @@
      заглушка, страница не пустая. -->
 <div class="section page-break">
   <p class="eyebrow">06 — Почему так получается</p>
-  <div class="section-title">Что лидер сделал, а вы — нет</div>
+  <div class="section-title">
+    {% if niche_is_open %}В вашей нише ИИ ещё не выбрал фаворита{% else %}Что лидер сделал, а вы — нет{% endif %}
+  </div>
 
-  {% if gap_analysis and gap_analysis.competitor_leader and gap_analysis.competitor_leader.name %}
+  {% if niche_is_open %}
+    <!-- ВЕТКА «НИША СВОБОДНА» (А2): у всех конкурентов низкий Presence —
+         это не отставание, а открытое окно. Более честный и сильный аргумент,
+         чем натянутый gap-чеклист «у меня всё есть, почему не цитируют». -->
+    <div class="gap-conclusion" style="background:#15171A; margin-bottom:6mm;">
+      <p>
+        <strong>В вашей нише ИИ ещё не выбрал фаворита.</strong>
+        Даже самый заметный игрок упоминается лишь
+        в <strong>{{ leader_presence_count }} из {{ prompts_count }}</strong> запросов.
+        Это не отставание — это <strong>открытое окно</strong>.
+      </p>
+      <p style="margin-top: 3mm;">
+        ИИ-ассистенты ещё не сформировали устойчивое мнение о том, кого рекомендовать
+        в нише «{{ niche_label }}»{% if region %} в регионе «{{ region }}»{% endif %}.
+        Кто первым выстроит правильные сигналы для языковых моделей — тот и займёт
+        это место в их ответах. Через год сделать это будет в разы дороже:
+        у конкурентов появится история упоминаний, и перебивать её придётся объёмом.
+      </p>
+    </div>
+
+    <p class="meth-text" style="margin-bottom: 4mm;">
+      Что значит «правильные сигналы» — это конкретные технические и контентные вещи,
+      которые языковые модели «любят» при выборе источника для ответа.
+      {% if client_site_analysis and client_site_analysis.fetched %}
+        Отмечено, что из этого уже есть на вашем сайте, а что — нет:
+      {% else %}
+        Базовый чек-лист готовности к цитированию ИИ:
+      {% endif %}
+    </p>
+
+    {% set checklist = [
+      ("Файл /llms.txt в корне сайта", "has_llms_txt", "Инструкция для языковых моделей о вашем бизнесе. Мало у кого есть — лёгкое преимущество."),
+      ("FAQ со schema.org/FAQPage", "has_faq_schema", "Структурированные вопросы-ответы — топливо для прямых ответов ИИ."),
+      ("Разметка организации (schema.org/Organization)", "has_organization_schema", "ИИ считывает факты о компании: название, регион, специализацию."),
+      ("Чёткая иерархия заголовков h1→h2→h3", "structured_headings", "Модели режут страницу на смысловые блоки по заголовкам."),
+      ("Страница «О компании»", "about_page_present", "Главный источник фактов о бренде для ИИ."),
+      ("Сигналы экспертизы (опыт, лицензии, команда)", "expertise_signals", "ИИ избегает рекомендовать бренды без подтверждённой экспертизы.")
+    ] %}
+    <table class="gap-table">
+      <thead>
+        <tr><th>Что важно для ИИ-цитирования</th><th>Есть у вас?</th></tr>
+      </thead>
+      <tbody>
+        {% for title, key, explain in checklist %}
+        {% set present = client_site_analysis and client_site_analysis.fetched and (client_site_analysis[key] if key != 'expertise_signals' else (client_site_analysis.expertise_signals or 0) >= 3) %}
+        <tr>
+          <td class="gap-leader">
+            <span class="gap-check">✓</span>
+            <strong>{{ title }}</strong>
+            <div class="gap-explain">{{ explain }}</div>
+          </td>
+          <td class="{{ 'gap-leader' if present else 'gap-client' }}">
+            {% if present %}<span class="gap-check">✓</span> Есть{% else %}<span class="gap-cross">✕</span> Нет{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <div class="gap-conclusion">
+      <p>
+        Окно открыто, но не навсегда. На следующей странице — конкретный план:
+        что закрыть самому уже на этой неделе, а где нужна структурная работа,
+        чтобы закрепиться в ответах ИИ первым.
+      </p>
+    </div>
+
+  {% elif gap_analysis and gap_analysis.competitor_leader and gap_analysis.competitor_leader.name %}
     {% set leader = gap_analysis.competitor_leader %}
 
     <p class="meth-text" style="margin-bottom: 5mm;">

@@ -71,8 +71,12 @@
   .cover {
     page-break-after: always;
     background: #0E0F12;
-    min-height: 297mm;
-    padding: 30mm 20mm 22mm;
+    /* Жёстко одна страница A4: height + overflow:hidden — чтобы низ обложки
+       (вердикт белым текстом) НЕ перетекал на страницу 2 со светлым фоном
+       и не оказывался «белым по бежевому» (Итерация-2, А4). */
+    height: 297mm;
+    overflow: hidden;
+    padding: 26mm 20mm 20mm;
     color: #E6E8EC;
     display: flex; flex-direction: column;
   }
@@ -90,19 +94,26 @@
     font-size: 12pt; color: #8A8F99; margin: 0 0 18mm;
     max-width: 130mm; line-height: 1.4;
   }
-  .cover-score { display: flex; align-items: flex-end; gap: 6mm; margin-top: auto; }
+  /* Score-блок — отдельная тёмная карточка (А4): вердикт всегда на тёмном
+     фоне, читаемо. page-break-inside:avoid — блок не разрывается. */
+  .cover-score {
+    display: flex; align-items: center; gap: 6mm; margin-top: auto;
+    background: #15171A; border: 1px solid #2F333B;
+    border-radius: 12px; padding: 7mm 8mm;
+    page-break-inside: avoid;
+  }
   .cover-score-num {
     font-family: 'TT Hoves Pro', sans-serif;
-    font-size: 96pt; line-height: 0.9; color: #A63D3D;
+    font-size: 84pt; line-height: 0.9; color: #A63D3D; flex-shrink: 0;
   }
-  .cover-score-side { padding-bottom: 8mm; }
+  .cover-score-side { flex: 1; }
   .cover-score-label {
     text-transform: uppercase; letter-spacing: 0.18em;
     font-size: 9pt; color: #8A8F99; margin-bottom: 1.5mm;
   }
   .cover-score-verdict {
     font-family: 'TT Hoves Pro', sans-serif;
-    font-size: 14pt; color: #FFFFFF; max-width: 90mm; line-height: 1.2;
+    font-size: 15pt; color: #FFFFFF; max-width: 95mm; line-height: 1.25;
   }
   .cover-date {
     margin-top: 8mm; font-size: 9pt; color: #8A8F99;

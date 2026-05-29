@@ -124,10 +124,25 @@ class Settings(BaseSettings):
     CONTACT_TG_BOT_URL: str = "https://t.me/catcore_sitebot"
 
     # === Пакеты услуг (Этап 3 ТЗ, страница 7 PDF) ===
-    # Сейчас значения "от {price} ₽" — фаундер уточнит реальные цифры в .env.
+    # Цены зафиксированы по регионам (Итерация-2, Б2). НЕ автоконвертация по курсу —
+    # курс плавает, цена услуги стабильна. РБ → BYN, РФ/прочее → ₽.
     PACKAGE_DORABOTKA_PRICE_FROM: str = "150 000"
     PACKAGE_FULL_SITE_PRICE_FROM: str = "350 000"
+    PACKAGE_DORABOTKA_PRICE_FROM_BYN: str = "3 500"
+    PACKAGE_FULL_SITE_PRICE_FROM_BYN: str = "9 900"
     PACKAGE_GROWTH_PROMISE_POINTS: int = 15  # рост Score за 90 дней
+
+    # === Логика страницы 6 «Почему так получается» (Итерация-2, А2) ===
+    # Если максимальный Presence среди конкурентов < этого порога — ниша «свободна»
+    # (ИИ ещё не выбрал фаворита), показываем ветку «открытое окно», а не «догони лидера».
+    NICHE_OPEN_PRESENCE_MAX: int = 30
+    # Если есть конкурент с Presence выше этого — точно «догони лидера» (сильный игрок).
+    NICHE_STRONG_LEADER_PRESENCE: int = 50
+
+    # === Воспроизводимость (Итерация-2, Б1) ===
+    # В пределах скольки дней повторный анализ того же домена берёт ту же нишу
+    # и тех же конкурентов (детерминированность для мониторинга динамики).
+    NICHE_REUSE_DAYS: int = 90
 
     # === Telegram ===
     TELEGRAM_BOT_TOKEN: str = ""

@@ -45,11 +45,15 @@ def calculate_visibility_score(analysis: Analysis, brand_name: str) -> int:
     else:
         sentiment_factor = 0.0
 
+    # Итерация-2, Б3: Position и Sentiment ВЗВЕШИВАЕМ на Presence.
+    # Иначе почти невидимый бренд (Presence 20%, но в этих 2 упоминаниях позиция
+    # и тональность хорошие) получал завышенный Score ~45. Теперь вклад качества
+    # упоминаний пропорционален тому, насколько часто бренд вообще упоминается —
+    # Score становится монотонным: больше присутствие → выше Score, без аномалий.
     score = (
         presence_rate * 50
         + model_coverage * 20
-        + position_score * 15
-        + sentiment_factor * 15
+        + (position_score * 15 + sentiment_factor * 15) * presence_rate
     )
 
     return min(100, max(0, round(score)))
