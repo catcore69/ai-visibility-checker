@@ -10,16 +10,19 @@
 Через 2–3 месяца естественно накапливается библиотека по 20–30 нишам.
 """
 
+import asyncio
 import json
 import re
+import xml.etree.ElementTree as ET
 from typing import Any, Optional
 
+import httpx
 from openai import AsyncOpenAI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.llm_prompts import PROMPT_GENERATOR_PROMPT
+from app.core.llm_prompts import PROMPT_GENERATOR_PROMPT, REAL_QUERIES_GROUPER_PROMPT
 from app.db.models.niche_prompt_template import NichePromptTemplate
 from app.db.session import AsyncSessionLocal
 from app.utils.logger import get_logger
@@ -87,6 +90,145 @@ async def _save_cached_prompts(
         logger.warning("prompt_cache_save_error", error=str(exc), niche_key=niche_key)
 
 
+async def _xmlriver_suggest(query: str) -> list[str]:
+    """Реальные автоподсказки поиска через XMLRiver. Возвращает список фраз."""
+    if not settings.XMLRIVER_USER or not settings.XMLRIVER_KEY:
+        return []
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as c:
+            resp = await c.get(
+                "https://xmlriver.com/suggest/xml",
+                params={
+                    "user": settings.XMLRIVER_USER,
+                    "key": settings.XMLRIVER_KEY,
+                    "query": query,
+                },
+            )
+            resp.raise_for_status()
+        root = ET.fromstring(resp.text)
+        # XML может быть {<root><sug>фраза</sug><sug>...</sug></root>} или иначе —
+        # берём ВСЕ текстовые узлы listа.
+        out: list[str] = []
+        for el in root.iter():
+            txt = (el.text or "").strip()
+            if txt and len(txt) > 5 and len(txt) < 200 and " " in txt:
+                out.append(txt)
+        return out[:30]
+    except Exception as exc:
+        logger.warning("xmlriver_suggest_error", query=query, error=str(exc))
+        return []
+
+
+async def _xmlriver_wordstat(query: str) -> list[str]:
+    """Реальные запросы из Яндекс.Wordstat через XMLRiver."""
+    if not settings.XMLRIVER_USER or not settings.XMLRIVER_KEY:
+        return []
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as c:
+            resp = await c.get(
+                "https://xmlriver.com/wordstat/xml",
+                params={
+                    "user": settings.XMLRIVER_USER,
+                    "key": settings.XMLRIVER_KEY,
+                    "query": query,
+                },
+            )
+            resp.raise_for_status()
+        root = ET.fromstring(resp.text)
+        out: list[str] = []
+        # Wordstat XMLRiver обычно отдаёт <word>фраза</word> + <shows>N</shows>.
+        for w in root.iter():
+            if (w.tag or "").lower() in ("word", "phrase", "query"):
+                txt = (w.text or "").strip()
+                if txt and 5 < len(txt) < 200:
+                    out.append(txt)
+        # Backup: любые текстовые узлы с пробелом.
+        if not out:
+            for el in root.iter():
+                txt = (el.text or "").strip()
+                if txt and " " in txt and 5 < len(txt) < 200:
+                    out.append(txt)
+        return out[:40]
+    except Exception as exc:
+        logger.warning("xmlriver_wordstat_error", query=query, error=str(exc))
+        return []
+
+
+async def _fetch_real_queries(niche: dict[str, Any]) -> list[str]:
+    """Итерация-3, Задача 2: реальные поисковые запросы вместо LLM-шаблонов.
+
+    Источники: автоподсказки поиска (XMLRiver suggest) + Яндекс.Wordstat.
+    Дедуп, чистка, ограничение длины. Дальше LLM только сгруппирует и отберёт 10.
+    """
+    category = niche.get("category", "").strip()
+    if not category:
+        return []
+    # Точка отсчёта — категория + город (если есть).
+    city = (niche.get("region", "") or "").split(",")[0].strip()
+    base = f"{category} {city}".strip() if city and "беларус" not in city.lower() and "росси" not in city.lower() else category
+
+    sug_task = _xmlriver_suggest(base)
+    ws_task = _xmlriver_wordstat(base)
+    # Доп.вариант — без города, общее по нише (если регион нишевый).
+    sug2_task = _xmlriver_suggest(category) if city else asyncio.sleep(0, result=[])
+    sug, ws, sug2 = await asyncio.gather(sug_task, ws_task, sug2_task, return_exceptions=True)
+
+    raw: list[str] = []
+    for src in (sug, ws, sug2):
+        if isinstance(src, list):
+            raw.extend(src)
+
+    # Чистка + дедуп с сохранением порядка.
+    seen: set[str] = set()
+    out: list[str] = []
+    for q in raw:
+        q_clean = re.sub(r"\s+", " ", q).strip(" .,;:!?")
+        if not q_clean or len(q_clean) < 8 or len(q_clean) > 150:
+            continue
+        # Чисто статусные/слишком общие запросы убираем.
+        if q_clean.lower() in ("найти", "купить", "цена"):
+            continue
+        nl = q_clean.lower()
+        if nl in seen:
+            continue
+        seen.add(nl)
+        out.append(q_clean)
+    logger.info("real_queries_fetched", base=base, raw=len(raw), unique=len(out))
+    return out
+
+
+async def _group_real_queries_via_llm(
+    niche: dict[str, Any], real_queries: list[str], count: int, brand_name: str = ""
+) -> list[str]:
+    """LLM только группирует/отбирает из РЕАЛЬНЫХ запросов — не выдумывает новые."""
+    if not real_queries:
+        return []
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, base_url=settings.OPENAI_BASE_URL)
+    lines = "\n".join(f"- {q}" for q in real_queries[:60])  # ограничиваем длину промпта
+    prompt = REAL_QUERIES_GROUPER_PROMPT.format(
+        category=niche.get("category", ""),
+        region=niche.get("region", ""),
+        target_audience_description=niche.get("target_audience_description", ""),
+        brand_name=brand_name or niche.get("brand", ""),
+        real_queries=lines,
+    )
+    try:
+        resp = await client.chat.completions.create(
+            model=settings.MODEL_TEXT,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+            max_tokens=800,
+        )
+        raw = (resp.choices[0].message.content or "[]").strip()
+        raw = raw.strip("```json").strip("```").strip()
+        items = json.loads(raw)
+        if isinstance(items, list):
+            return [p.strip() for p in items if isinstance(p, str) and p.strip()][:count]
+    except Exception as exc:
+        logger.warning("real_queries_group_error", error=str(exc))
+    return []
+
+
 async def _generate_via_llm(niche: dict[str, Any], count: int) -> list[str]:
     """Один LLM-вызов на генерацию промптов."""
     client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, base_url=settings.OPENAI_BASE_URL)
@@ -139,7 +281,22 @@ async def generate_prompts(niche: dict[str, Any], count: int = 10) -> list[str]:
         logger.info("prompts_from_cache", niche_key=niche_key, count=len(cached))
         return cached[:count]
 
-    prompts = await _generate_via_llm(niche, count)
+    # Итерация-3, Задача 2: сначала пробуем РЕАЛЬНЫЕ запросы (suggest + wordstat),
+    # LLM только группирует и отбирает 10. Если реальных недостаточно —
+    # graceful fallback на LLM-генерацию по шаблонам.
+    prompts: list[str] = []
+    try:
+        real = await _fetch_real_queries(niche)
+        if len(real) >= 10:
+            grouped = await _group_real_queries_via_llm(niche, real, count)
+            if len(grouped) >= max(count - 2, 5):
+                prompts = grouped
+                logger.info("prompts_from_real_queries", niche_key=niche_key, count=len(prompts))
+    except Exception as exc:
+        logger.warning("real_queries_pipeline_failed", error=str(exc))
+
+    if not prompts:
+        prompts = await _generate_via_llm(niche, count)
 
     if prompts and len(prompts) >= 5:
         # Сохраняем только если получили достаточное число — мусор не кешируем.
