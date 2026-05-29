@@ -56,11 +56,18 @@
     </div>
     <div class="footer">
       <div class="expert">
-        <img src="{{ EXPERT_PHOTO_URL }}" alt="{{ EXPERT_NAME }}">
+        {# Фото эксперта показываем ТОЛЬКО если задан валидный URL (не плейсхолдер) #}
+        {% if EXPERT_PHOTO_URL and ('http' in EXPERT_PHOTO_URL or EXPERT_PHOTO_URL.startswith('/')) and '[' not in EXPERT_PHOTO_URL %}
+        <img src="{{ EXPERT_PHOTO_URL }}" alt="{{ STUDIO_NAME }}">
+        {% endif %}
         <div>
-          <strong>{{ EXPERT_NAME }}</strong><br>
-          <span style="color:#666;">{{ EXPERT_TITLE }}</span><br>
-          <a href="{{ CONTACT_TG_BOT_URL }}" style="color:#A63D3D;">💬 Написать в Telegram</a>
+          {% if EXPERT_NAME and '[' not in EXPERT_NAME %}
+          <strong>{{ EXPERT_NAME }}</strong>{% if EXPERT_TITLE and '[' not in EXPERT_TITLE %}<br><span style="color:#6E7480;">{{ EXPERT_TITLE }}</span>{% endif %}<br>
+          {% else %}
+          <strong>{{ STUDIO_NAME }}</strong><br>
+          <span style="color:#6E7480;">Студия GEO-оптимизации под выдачу ИИ</span><br>
+          {% endif %}
+          <a href="{{ CONTACT_TG_BOT_URL }}" style="color:#A63D3D;">Написать в Telegram</a>
         </div>
       </div>
     </div>

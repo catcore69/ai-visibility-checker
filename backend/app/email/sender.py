@@ -1,3 +1,4 @@
+import re
 from email.message import EmailMessage
 from pathlib import Path
 
@@ -7,6 +8,25 @@ from jinja2 import Environment, FileSystemLoader
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _html_to_text(html: str) -> str:
+    """Грубо превращает HTML в читаемый plaintext для текстовой части письма.
+
+    Нужно, чтобы текстовая и HTML-версии были похожи (спам-фильтры штрафуют
+    за сильное расхождение — правило MPART_ALT_DIFF).
+    """
+    text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html, flags=re.DOTALL | re.IGNORECASE)
+    # Переносы строк на месте блочных тегов
+    text = re.sub(r"</(p|div|h[1-6]|li|tr|br)[^>]*>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "", text)  # остальные теги
+    # HTML-сущности — минимально
+    text = (text.replace("&nbsp;", " ").replace("&mdash;", "—")
+                .replace("&amp;", "&").replace("&laquo;", "«").replace("&raquo;", "»"))
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n\s*\n\s*\n+", "\n\n", text)
+    return text.strip() or "Откройте письмо в HTML-режиме."
 
 
 class EmailSender:
@@ -52,7 +72,15 @@ class EmailSender:
             message["From"] = f"{self.from_name} <{self.from_email}>"
             message["To"] = to_email
             message["Subject"] = subject
-            message.set_content("Это письмо требует HTML-просмотра.")
+            # List-Unsubscribe повышает доверие почтовых провайдеров (mail.ru/gmail).
+            # Добавляем для маркетинговых писем, где есть ссылка отписки.
+            unsub = context.get("unsubscribe_url")
+            if unsub:
+                message["List-Unsubscribe"] = f"<{unsub}>"
+                message["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+            # Текстовая версия должна соответствовать HTML (иначе спам-фильтры
+            # штрафуют за MPART_ALT_DIFF). Генерируем её из HTML.
+            message.set_content(_html_to_text(html_content))
             message.add_alternative(html_content, subtype="html")
 
             await aiosmtplib.send(
