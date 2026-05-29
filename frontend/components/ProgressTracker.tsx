@@ -27,11 +27,13 @@ export default function ProgressTracker({ status }: Props) {
     (status as any).progress ?? status.progress_pct ?? STEP_PROGRESS[currentStep] ?? 5;
   const isDoneAll = currentStep === 'completed' || (status as any).completed === true;
 
+  // Итерация-3: порядок шагов соответствует новому pipeline
+  // (опрос идёт ДО подбора конкурентов — конкуренты из реальных ответов ИИ).
   const steps = [
     { key: 'niche_detection', label: 'Определение ниши' },
-    { key: 'competitor_discovery', label: 'Поиск конкурентов' },
     { key: 'prompt_generation', label: 'Генерация запросов' },
     { key: 'polling_models', label: 'Опрос ИИ-ассистентов' },
+    { key: 'competitor_discovery', label: 'Поиск конкурентов' },
     { key: 'analyzing_responses', label: 'Анализ упоминаний' },
     { key: 'building_pdf', label: 'Формирование отчёта' },
   ];

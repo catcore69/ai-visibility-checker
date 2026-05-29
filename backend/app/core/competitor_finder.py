@@ -35,6 +35,10 @@ _COMPETITOR_URL_BLACKLIST = {
     "tripadvisor.ru", "tripadvisor.com", "booking.com", "ostrovok.ru",
     # Энциклопедии/новости
     "wikipedia.org", "ru.wikipedia.org", "be.wikipedia.org",
+    # Бизнес-реестры/каталоги юрлиц (не провайдеры услуги)
+    "checko.ru", "rusprofile.ru", "list-org.com", "sbis.ru", "kontur.ru",
+    "nalog.ru", "nalog.gov.ru", "egrul.nalog.ru", "egr.gov.by",
+    "spravka.ru", "yell.ru", "zoon.ru", "zoon.by",
 }
 
 
@@ -526,16 +530,22 @@ def _category_keywords(niche: dict[str, Any]) -> list[str]:
     return list({t[:6] for t in distinctive})
 
 
-def _site_matches_category(text: str, keywords: list[str]) -> bool:
-    """True, если в тексте сайта встречается хоть один отличительный стем
-    категории. Если ключевых слов нет (категория размытая) — пропускаем сайт
-    как валидный (не блокируем без сигнала)."""
+def _site_matches_category(text: str, keywords: list[str], min_total: int = 2) -> bool:
+    """True, если сайт реально про эту категорию.
+
+    Итерация-3: одного вхождения мало — «Юрист для людей» иногда упоминает
+    «бухгалтерские услуги» в списке смежных услуг, но это не бухгалтерская
+    фирма. Требуем СУММУ вхождений всех стемов категории ≥ min_total —
+    реальный профильный сайт повторяет ключевые слова много раз, случайное
+    упоминание это не пройдёт.
+    """
     if not keywords:
         return True
     if not text:
         return False
     t = text.lower()
-    return any(k in t for k in keywords)
+    total = sum(t.count(k) for k in keywords)
+    return total >= min_total
 
 
 def _city_from_region(region: str) -> str:
