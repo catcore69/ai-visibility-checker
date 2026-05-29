@@ -310,28 +310,62 @@ async def _find_competitors_via_serp(
     exclude: list[str],
     count: int = 5,
 ) -> list[str]:
-    """Срочный фикс 3.1: конкуренты из реальной поисковой выдачи, не из памяти LLM."""
+    """Итерация-3, Задача 1.2/4: конкуренты из РЕАЛЬНОЙ выдачи.
+
+    Берём URL реальных сайтов (не агрегаторы) и извлекаем НАСТОЯЩЕЕ название
+    компании С САМОГО САЙТА (schema.org/og:site_name/подвал) — НЕ из <title>
+    (там SEO-фразы). Сайт не открылся / название не извлеклось → не конкурент.
+    """
+    from app.core.site_analyzer import fetch_org_name, looks_generic_name
+    from app.utils.url_normalizer import extract_brand_from_url
+
     category = niche.get("category", "")
     subcategory = niche.get("subcategory", "")
     region = niche.get("region", "")
-    # Запрос вида «{category} {subcategory} {region}» — реальная локальная выдача.
     query = " ".join(p for p in [category, subcategory, region] if p).strip()
     if not query:
         return []
 
     results = await _xmlriver_search_results(query, region=region, num=20)
-    # Отсеиваем агрегаторы/справочники/соцсети по домену.
-    candidates = [r for r in results if r["domain"] and not _is_blacklisted_host(r["domain"])]
-    if not candidates:
+
+    # Уникальные реальные домены (без агрегаторов/соцсетей), сохраняем порядок выдачи.
+    seen_domains: set[str] = set()
+    real_urls: list[str] = []
+    for r in results:
+        d = r.get("domain") or ""
+        if not d or _is_blacklisted_host(d) or d in seen_domains:
+            continue
+        seen_domains.add(d)
+        real_urls.append(r["url"])
+    real_urls = real_urls[: max(count * 2, 8)]
+    if not real_urls:
+        logger.info("competitors_from_serp", query=query, real_domains=0, found=0)
         return []
 
-    confirmed = await _llm_extract_companies(candidates, niche, exclude, count)
-    # Итерация-3, Задача 1.2/4: отбрасываем родовые словосочетания-категории
-    # («Бухгалтерские услуги», «Аудит и консалтинг») — это не названия компаний.
-    from app.core.site_analyzer import looks_generic_name
-    confirmed = [c for c in confirmed if not looks_generic_name(c)]
-    logger.info("competitors_from_serp", query=query, found=len(confirmed))
-    return confirmed
+    # Параллельно заходим на каждый сайт и достаём реальное название организации.
+    names = await asyncio.gather(*[fetch_org_name(u) for u in real_urls], return_exceptions=True)
+
+    excl_lower = {e.strip().lower() for e in exclude if e}
+    out: list[str] = []
+    seen_names: set[str] = set()
+    for u, nm in zip(real_urls, names):
+        name = nm if isinstance(nm, str) and nm.strip() else None
+        if not name:
+            # Сайт открылся, но название не извлеклось → берём бренд из домена
+            # (buhvitebsk.by → «Buhvitebsk»). Не выдумка — это реальный домен.
+            name = extract_brand_from_url(u) if isinstance(nm, str) or nm is None else None
+        if not name or looks_generic_name(name):
+            continue
+        nl = name.lower()
+        if nl in excl_lower or nl in seen_names:
+            continue
+        seen_names.add(nl)
+        out.append(name)
+        if len(out) >= count:
+            break
+
+    logger.info("competitors_from_serp", query=query, real_domains=len(real_urls), found=len(out))
+    return out
 
 
 async def extract_brands_from_ai_responses(

@@ -140,38 +140,74 @@ def _walk_schema(node: Any, out: dict[str, bool]) -> None:
             _walk_schema(item, out)
 
 
-# Слова-маркеры generic-описаний (НЕ названия компаний, а SEO-фразы из <title>).
-# Если «название» содержит такое и не имеет собственного имени — считаем generic.
-_GENERIC_NAME_MARKERS = [
-    "услуг", "аутсорсинг", "аутсорс", "бухгалтери", "консалтинг", "сопровожден",
-    "под ключ", "для бизнеса", "в витебске", "в минске", "в москве", "в спб",
-    "цены", "недорого", "официальный сайт", "каталог", "интернет-магазин",
-    "доставка", "ремонт", "купить", "заказать",
-]
 # Маркеры собственного юр.названия — если есть, имя НЕ generic.
 _LEGAL_NAME_RE = re.compile(
     r'(ООО|ОДО|ЗАО|ОАО|ЧУП|ЧТУП|УП|ИП|ПАО|АО)\s*[«"\']?\s*([A-ZА-ЯЁ][\w\-\s«»"\']{1,40})',
     re.UNICODE,
 )
 
+# Родовые/служебные слова. «Generic» — это когда ВСЕ значимые слова отсюда
+# (чистая категория «Бухгалтерские услуги»). Если есть хоть один собственный
+# токен («Время», «ЛюксБаланс») — это бренд, НЕ generic.
+_GENERIC_WORDS = {
+    "услуги", "услуга", "услуг", "бухгалтерские", "бухгалтерия", "бухгалтерский",
+    "бухгалтерское", "бухучёт", "бухучет", "аутсорсинг", "аутсорс", "аудит",
+    "аудиторские", "консалтинг", "консалтинговые", "сопровождение", "учёт", "учет",
+    "налоговый", "налоговые", "налоги", "налогообложение", "решение", "решения",
+    "компания", "фирма", "организация", "центр", "агентство", "бюро", "группа",
+    "сервис", "сервисы", "обслуживание", "комплексное", "для", "бизнеса", "и", "в",
+    "на", "под", "ключ", "цены", "недорого", "каталог", "магазин", "доставка",
+    # города/регионы — это не бренд, а гео-привязка SEO-фразы
+    "витебске", "витебск", "минске", "минск", "москве", "москва", "спб", "беларуси",
+    "беларусь", "области", "области.",
+}
+
 
 def looks_generic_name(name: str) -> bool:
-    """True, если «название» похоже на SEO-фразу/описание услуги, а не на бренд.
+    """True, если «название» — родовое описание (категория), а не бренд.
 
-    Используется и в competitor_finder/pipeline для решения «переименовать ли».
+    Логика (Итерация-3): generic ⇔ среди слов НЕТ ни одного собственного токена
+    (всё — категория/гео/служебное). «Бухгалтерские услуги» → True; «Время Учёта»,
+    «ЛюксБаланс», «Бухгалтерские технологии» → False. Лучше пропустить лишнее,
+    чем выкинуть реальный бренд (recall важнее точности на этом шаге).
     """
-    s = (name or "").strip().lower()
+    s = (name or "").strip()
     if not s:
         return True
     # Юр.форма в начале — это уже конкретное название.
-    if re.match(r"^(ооо|одо|зао|оао|чуп|чтуп|уп|ип|пао|ао)\b", s):
+    if re.match(r"^(ооо|одо|зао|оао|чуп|чтуп|уп|ип|пао|ао)\b", s.lower()):
         return False
-    # Слишком длинная фраза из нескольких слов с маркерами — описание.
-    has_marker = any(m in s for m in _GENERIC_NAME_MARKERS)
-    word_count = len(s.split())
-    if has_marker and word_count >= 2:
-        return True
-    return False
+    tokens = [t.strip("«»\"'.,()-—:;").lower() for t in s.split()]
+    meaningful = [t for t in tokens if t and t not in _GENERIC_WORDS and len(t) > 2]
+    return len(meaningful) == 0
+
+
+async def fetch_org_name(url: str) -> Optional[str]:
+    """Итерация-3, Задача 1.2: настоящее название организации с её сайта.
+
+    Лёгкий fetch (без полного analyze_site) + извлечение из schema.org/og:site_name/
+    подвала. НЕ из <title>. None — если сайт не открылся / название не извлеклось.
+    """
+    if not url or not url.startswith(("http://", "https://")):
+        return None
+    try:
+        async with httpx.AsyncClient(
+            timeout=15.0,
+            follow_redirects=True,
+            headers={
+                "User-Agent": USER_AGENT,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "ru,en;q=0.9",
+            },
+        ) as client:
+            resp = await client.get(url)
+            if resp.status_code >= 400 or not resp.text:
+                return None
+            soup = BeautifulSoup(resp.text, "html.parser")
+            return _extract_org_name(soup, url)
+    except Exception as exc:
+        logger.warning("fetch_org_name_error", url=url, error=str(exc))
+        return None
 
 
 def _org_name_from_jsonld(soup: BeautifulSoup) -> Optional[str]:
