@@ -49,15 +49,19 @@ export const STEP_LABELS: Record<string, string> = {
   failed:                     'Ошибка',
 };
 
+// Итерация-3: pipeline теперь опрашивает модели ДО подбора конкурентов
+// (конкуренты строятся из реальных ответов ИИ, метод Profound). Прогресс-числа
+// синхронизированы с pipeline.py.
 export const STEP_PROGRESS: Record<string, number> = {
   pending_verification:        0,
   verification_complete:       3,
   pending:                     3,
   queued:                      3,
   niche_detection:             5,
-  competitor_discovery:       15,
   prompt_generation:          25,
   polling_models:             35,
+  competitor_discovery:       58,
+  site_analysis:              64,
   analyzing_responses:        70,
   calculating_score:          85,
   generating_recommendations: 92,
@@ -76,11 +80,14 @@ export const STEP_PROGRESS: Record<string, number> = {
  * собран, поэтому шаги «Анализ» и «Формирование отчёта» помечаем как done
  * (индекс = steps.length). Клиент видит «всё готово, ждём эксперта».
  */
+// Итерация-3: порядок шагов соответствует новому pipeline (опрос ДО конкурентов).
+// «Поиск конкурентов» теперь шаг 4 (после опроса), внутри также site_analysis.
 export const STEP_INDEX: Record<string, number> = {
   niche_detection:             0,
-  competitor_discovery:        1,
-  prompt_generation:           2,
-  polling_models:              3,
+  prompt_generation:           1,
+  polling_models:              2,
+  competitor_discovery:        3,
+  site_analysis:               3, // мапим на «Поиск конкурентов» — это его финальная часть
   analyzing_responses:         4,
   calculating_score:           4,
   generating_recommendations:  4,
