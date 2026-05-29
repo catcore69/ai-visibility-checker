@@ -55,10 +55,18 @@ class BasePoller(ABC):
                 cached=True,
             )
 
+        # Жёсткий таймаут на ОДИН вызов модели. Без него зависший HTTP-запрос
+        # (модель/прокси держит соединение и не отвечает) морозит весь asyncio.gather
+        # опроса — отчёт навсегда застревает на polling_models. На холодном кеше это
+        # вскрывается сразу. wait_for отменяет повисший вызов, дальше — обычный ретрай.
+        call_timeout = getattr(self.config, "LLM_CALL_TIMEOUT", 45)
+
         for attempt in range(3):
             try:
                 start = time.monotonic()
-                response_text = await self._query_raw(prompt)
+                response_text = await asyncio.wait_for(
+                    self._query_raw(prompt), timeout=call_timeout
+                )
                 latency = int((time.monotonic() - start) * 1000)
 
                 ttl = self.config.CACHE_TTL_DAYS * 24 * 3600
