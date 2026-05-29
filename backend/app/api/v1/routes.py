@@ -125,6 +125,18 @@ async def start_check(
     expires_at = now + timedelta(hours=24)
     domain_key, domain_brand_key = canonical_keys(body_url, brand_name)
 
+    # Регион определяем СРАЗУ (по сигналам сайта), чтобы и отчёт, и уведомление
+    # эксперту в Telegram были верными с самого начала, а не «Россия» по дефолту.
+    # Pipeline позже подтвердит/уточнит регион по полному контенту.
+    try:
+        from app.core.region_detector import detect_region
+        region_info, _ = await detect_region(body_url)
+        detected_region = (region_info.get("region") or "").strip()
+    except Exception as exc:
+        logger.warning("check_region_detect_failed", error=str(exc))
+        detected_region = ""
+    effective_region = detected_region or body.region or "Россия"
+
     # Подсказка ниши от клиента — сохраняем в niche_data как user_hint,
     # чтобы pipeline (detect_niche) мог её учесть.
     niche_hint = (body.niche_hint or "").strip() or None
@@ -137,7 +149,7 @@ async def start_check(
         domain_normalized=domain_normalized,
         canonical_key=domain_brand_key,
         brand_name=brand_name,
-        region=body.region,
+        region=effective_region,
         email=str(body.email),
         status="pending_verification",
         email_verification_token=verification_token,
