@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.analyzer import analyze_responses
-from app.core.competitor_finder import find_competitor_url, find_competitors
+from app.core.competitor_finder import build_competitor_list, find_competitor_url
 from app.core.gap_analyzer import build_gap_analysis
 from app.core.niche_detector import detect_niche
 from app.core.prompt_generator import generate_prompts
@@ -203,19 +203,43 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
             )
             # Освежаем объект, чтобы дальше использовать новый бренд.
             report = await get_report(db, report_id)
-            await update_report_status(db, report_id, "competitor_discovery", progress=15)
+            # Конкуренты определяем ПОСЛЕ опроса моделей (Итерация-3, Фаза 2) —
+            # из реально упомянутых в ответах ИИ брендов. Пока не заданы.
+            competitors = None
+            competitors_source = None
 
-            # ШАГ 3: Конкуренты (Этап 1.1 ТЗ — учитываем указанных клиентом).
+        # ===== ШАГ 4: Промпты (Фаза 2: опрос ИДЁТ ДО подбора конкурентов) =====
+        await update_report_status(db, report_id, "prompt_generation", progress=25)
+        prompts = await generate_prompts(niche, count=settings.PROMPTS_PER_REPORT)
+        await update_report_field(db, report_id, prompts=prompts)
+
+        # ===== ШАГ 5: Опрос моделей реальными запросами =====
+        await update_report_status(db, report_id, "polling_models", progress=35)
+        pollers = _build_pollers(redis_cache, settings)
+        niche_key = f"{niche.get('category', '')}:{report.region}"
+        raw_responses = await poll_all_models(prompts, pollers, niche_key)
+        raw_responses_json = {
+            model: {prompt: r.response_text for prompt, r in prompt_map.items()}
+            for model, prompt_map in raw_responses.items()
+        }
+        await update_report_field(db, report_id, raw_responses=raw_responses_json)
+
+        # ===== ШАГ 5.5: Конкуренты ИЗ РЕАЛЬНЫХ ДАННЫХ (метод Profound) =====
+        # Реально упомянутые в ответах ИИ бренды + реальная выдача. Никаких
+        # выдумок. Если нишу/конкурентов взяли из прошлого отчёта (Б1) — не пересчитываем.
+        if not (reused and competitors):
+            await update_report_status(db, report_id, "competitor_discovery", progress=58)
             client_competitors = (
                 list(report.client_competitors)
                 if isinstance(report.client_competitors, list)
                 else None
             )
-            competitors, competitors_source = await find_competitors(
+            competitors, competitors_source = await build_competitor_list(
                 niche,
                 brand_name=report.brand_name,
-                count=settings.COMPETITORS_PER_REPORT,
                 client_competitors=client_competitors,
+                raw_responses=raw_responses,
+                count=settings.COMPETITORS_PER_REPORT,
             )
             await update_report_field(
                 db,
@@ -224,9 +248,9 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
                 competitors_source=competitors_source,
             )
 
-        # ШАГ 3.5: Анализ сайтов клиента и конкурентов (Этап 2 ТЗ).
+        # ===== ШАГ 5.6: Анализ сайтов клиента и конкурентов (Этап 2 ТЗ) =====
         # Делаем параллельно, исключения внутри analyze_site не роняют pipeline.
-        await update_report_status(db, report_id, "site_analysis", progress=22)
+        await update_report_status(db, report_id, "site_analysis", progress=64)
         try:
             # URL конкурентов через XMLRiver — у нас только имена.
             url_tasks = [find_competitor_url(name, report.region) for name in (competitors or [])]
@@ -327,27 +351,8 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
             logger.error("site_analysis_step_failed", error=str(exc), error_type=type(exc).__name__)
             # Не блокируем pipeline — без site-analysis отчёт всё равно собирается.
 
-        await update_report_status(db, report_id, "prompt_generation", progress=25)
-
-        # ШАГ 4: Промпты
-        prompts = await generate_prompts(niche, count=settings.PROMPTS_PER_REPORT)
-        await update_report_field(db, report_id, prompts=prompts)
-        await update_report_status(db, report_id, "polling_models", progress=35)
-
-        # ШАГ 5: Опрос моделей
-        pollers = _build_pollers(redis_cache, settings)
-        niche_key = f"{niche.get('category', '')}:{report.region}"
-        raw_responses = await poll_all_models(prompts, pollers, niche_key)
-
-        # Сохраняем только тексты (JSONB не хранит объекты LLMResponse)
-        raw_responses_json = {
-            model: {prompt: r.response_text for prompt, r in prompt_map.items()}
-            for model, prompt_map in raw_responses.items()
-        }
-        await update_report_field(db, report_id, raw_responses=raw_responses_json)
+        # ===== ШАГ 6: Анализ упоминаний (по тем же ответам, что уже опросили) =====
         await update_report_status(db, report_id, "analyzing_responses", progress=70)
-
-        # ШАГ 6: Анализ
         all_brands = [report.brand_name] + (competitors or [])
         analysis = await analyze_responses(raw_responses, all_brands)
         await update_report_field(db, report_id, analysis=analysis.to_dict())

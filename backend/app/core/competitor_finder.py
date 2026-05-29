@@ -1,3 +1,4 @@
+import asyncio
 import json
 import re
 import xml.etree.ElementTree as ET
@@ -331,6 +332,143 @@ async def _find_competitors_via_serp(
     confirmed = [c for c in confirmed if not looks_generic_name(c)]
     logger.info("competitors_from_serp", query=query, found=len(confirmed))
     return confirmed
+
+
+async def extract_brands_from_ai_responses(
+    raw_responses: dict,
+    brand_name: str,
+    niche: dict[str, Any],
+    max_brands: int = 8,
+) -> list[str]:
+    """Итерация-3, Задача 1.1 (метод Profound): извлекаем РЕАЛЬНО упомянутые
+    в ответах ИИ бренды-поставщики. Это языковая задача (извлечение сущностей
+    из готового текста) — здесь LLM уместна.
+
+    raw_responses: {model: {prompt: LLMResponse}}. Если ИИ не назвал конкретных
+    компаний — вернём пустой список (честно: в нише нет ИИ-фаворитов).
+    """
+    texts: list[str] = []
+    for _model, pmap in (raw_responses or {}).items():
+        for _prompt, r in (pmap or {}).items():
+            t = (getattr(r, "response_text", "") or "").strip()
+            if t:
+                texts.append(t)
+    if not texts:
+        return []
+
+    # Группируем тексты в чанки (экономим вызовы), не более 6 чанков.
+    chunks: list[str] = []
+    cur = ""
+    for t in texts:
+        piece = t[:6000]
+        if len(cur) + len(piece) > 6000 and cur:
+            chunks.append(cur)
+            cur = ""
+        cur += "\n\n---\n\n" + piece
+    if cur:
+        chunks.append(cur)
+    chunks = chunks[:6]
+
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, base_url=settings.OPENAI_BASE_URL)
+    category = niche.get("category", "")
+    region = niche.get("region", "")
+    sem = asyncio.Semaphore(4)
+
+    async def _one(chunk: str) -> list[str]:
+        prompt = (
+            f"Ниже — ответы ИИ-ассистентов на запросы пользователей про «{category}» "
+            f"в регионе «{region}».\n"
+            f"Перечисли ТОЛЬКО названия КОНКРЕТНЫХ компаний/брендов, которые упомянуты "
+            f"как поставщики этой услуги/товара.\n"
+            f"НЕ включай: категории и родовые словосочетания («бухгалтерские услуги»), "
+            f"города, госорганы, маркетплейсы/агрегаторы, а также сам бренд «{brand_name}».\n"
+            f"Если конкретных компаний не названо — верни пустой массив [].\n\n"
+            f"Ответы ИИ:\n{chunk}\n\n"
+            f'Верни СТРОГО JSON-массив строк: ["Компания 1", "Компания 2"]. Только JSON.'
+        )
+        try:
+            async with sem:
+                resp = await client.chat.completions.create(
+                    model=settings.MODEL_EXTRACTION,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0,
+                    max_tokens=300,
+                )
+            raw = (resp.choices[0].message.content or "[]").strip()
+            raw = raw.strip("```json").strip("```").strip()
+            items = json.loads(raw)
+            return [c.strip() for c in items if isinstance(c, str) and c.strip()] if isinstance(items, list) else []
+        except Exception as exc:
+            logger.warning("extract_brands_from_ai_error", error=str(exc))
+            return []
+
+    results = await asyncio.gather(*[_one(c) for c in chunks])
+
+    from app.core.site_analyzer import looks_generic_name
+    brand_l = (brand_name or "").strip().lower()
+    counter: dict[str, int] = {}
+    canonical: dict[str, str] = {}  # lower → оригинальное написание
+    for lst in results:
+        for name in lst:
+            n = name.strip()
+            nl = n.lower()
+            if not n or nl == brand_l or looks_generic_name(n):
+                continue
+            counter[nl] = counter.get(nl, 0) + 1
+            canonical.setdefault(nl, n)
+
+    ranked = sorted(counter.items(), key=lambda kv: -kv[1])
+    out = [canonical[nl] for nl, _ in ranked][:max_brands]
+    logger.info("brands_from_ai_responses", found=len(out), candidates=list(counter.keys())[:10])
+    return out
+
+
+async def build_competitor_list(
+    niche: dict[str, Any],
+    brand_name: str,
+    client_competitors: Optional[list[str]],
+    raw_responses: dict,
+    count: int = 5,
+) -> tuple[list[str], str]:
+    """Итерация-3, Задача 1.4: список конкурентов ТОЛЬКО из реальных данных.
+
+    Приоритет: 1) ссылки клиента → 2) реально упомянутые в ответах ИИ (с
+    проверкой реальным сайтом) → 3) реальная поисковая выдача. Никакого LLM
+    «из головы». Если реальных <3 → source="sparse" (ниша свободна).
+    """
+    region = niche.get("region", "")
+    client_list = _normalize_client_competitors(client_competitors, brand_name)[:count]
+    if len(client_list) >= count:
+        logger.info("competitors_from_client_only", count=len(client_list), brand=brand_name)
+        return client_list[:count], "client"
+
+    # Источник А — реально упомянутые ИИ бренды, верифицированные живым сайтом.
+    ai_names = await extract_brands_from_ai_responses(raw_responses, brand_name, niche)
+    ai_verified: list[str] = []
+    if ai_names:
+        urls = await asyncio.gather(
+            *[find_competitor_url(n, region) for n in ai_names], return_exceptions=True
+        )
+        for n, u in zip(ai_names, urls):
+            if isinstance(u, str) and u:
+                ai_verified.append(n)
+        logger.info("competitors_from_ai_verified", candidates=len(ai_names), verified=len(ai_verified))
+
+    # Источник Б — реальная поисковая выдача (без уже учтённых).
+    exclude = [brand_name] + client_list + ai_verified
+    serp = await _find_competitors_via_serp(niche, exclude=exclude, count=count)
+
+    # Слияние с приоритетом: клиент → ИИ-верифицированные → выдача.
+    merged = _merge_dedupe(client_list, ai_verified, count)
+    merged = _merge_dedupe(merged, serp, count)
+
+    if len(merged) >= 3:
+        source = "client" if (client_list and not ai_verified and not serp) else "verified"
+        return merged[:count], source
+
+    # Реальных конкурентов <3 → честный сигнал «ниша свободна».
+    logger.info("competitors_sparse", count=len(merged), brand=brand_name)
+    return merged[:count], "sparse"
 
 
 async def find_competitors(
