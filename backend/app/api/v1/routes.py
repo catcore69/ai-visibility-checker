@@ -529,15 +529,27 @@ async def resend_verification_email(
         raise HTTPException(429, "Подождите 60 секунд перед повторной отправкой.")
 
     report = await get_report(db, report_id)
-    if not report or report.status != "pending_verification":
-        raise HTTPException(404, "Заявка не найдена или уже подтверждена.")
+    if not report:
+        raise HTTPException(404, "Заявка не найдена.")
+
+    # Итерация-3: разводим случаи. Отдельный 404 «не найдено» оставляем только
+    # для реально несуществующих отчётов; если отчёт уже верифицирован/идёт/готов —
+    # это не ошибка, отдаём 200 с понятным состоянием (фронт показывает не 404,
+    # а нормальный статус «отчёт уже обрабатывается / готов»).
+    if report.status == "completed":
+        return {"sent": False, "status": report.status, "message": "Отчёт уже готов — проверьте почту."}
+    if report.status != "pending_verification":
+        return {
+            "sent": False,
+            "status": report.status,
+            "message": "Заявка уже подтверждена, отчёт сейчас формируется. Письмо верификации больше не нужно.",
+        }
 
     from app.email.sender import EmailSender
     sender = EmailSender(settings)
     await sender.send_verification(report)
-
     await redis.set(resend_key, "1", ttl=60)
-    return {"sent": True}
+    return {"sent": True, "status": report.status}
 
 
 @router.post("/telegram/webhook/{secret}")
