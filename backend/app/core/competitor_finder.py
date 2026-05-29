@@ -18,14 +18,23 @@ logger = get_logger(__name__)
 # Хосты, которые не считаем сайтом конкурента (агрегаторы, маркетплейсы, соцсети).
 # Когда ищем сайт по имени бренда через SERP — пропускаем эти результаты.
 _COMPETITOR_URL_BLACKLIST = {
+    # Соцсети и мессенджеры
     "vk.com", "instagram.com", "facebook.com", "ok.ru", "youtube.com",
-    "t.me", "twitter.com", "x.com", "tiktok.com",
+    "t.me", "twitter.com", "x.com", "tiktok.com", "linkedin.com",
+    # Маркетплейсы РФ
     "ozon.ru", "wildberries.ru", "wb.ru", "avito.ru", "youla.ru",
     "drom.ru", "auto.ru", "cian.ru", "yandex.market", "market.yandex.ru",
     "sbermegamarket.ru", "megamarket.ru",
-    "2gis.ru", "yandex.ru", "ya.ru", "google.com", "google.ru",
+    # Маркетплейсы/агрегаторы РБ (Итерация-3 фикс: Куфар не должен быть «конкурентом»)
+    "kufar.by", "av.by", "hata.by", "deal.by", "relax.by", "onliner.by",
+    "praca.by", "rabota.by", "salonbel.by", "1prof.by",
+    # Справочники/карты
+    "2gis.ru", "2gis.by", "yandex.ru", "ya.ru", "google.com", "google.ru",
+    "yandex.by", "google.by", "maps.google.com",
+    "spr.by", "flamp.ru", "flamp.by", "rejting.by",
     "tripadvisor.ru", "tripadvisor.com", "booking.com", "ostrovok.ru",
-    "wikipedia.org", "ru.wikipedia.org",
+    # Энциклопедии/новости
+    "wikipedia.org", "ru.wikipedia.org", "be.wikipedia.org",
 }
 
 

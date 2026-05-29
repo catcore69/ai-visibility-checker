@@ -140,11 +140,31 @@ def _walk_schema(node: Any, out: dict[str, bool]) -> None:
             _walk_schema(item, out)
 
 
-# Маркеры собственного юр.названия — если есть, имя НЕ generic.
-_LEGAL_NAME_RE = re.compile(
-    r'(ООО|ОДО|ЗАО|ОАО|ЧУП|ЧТУП|УП|ИП|ПАО|АО)\s*[«"\']?\s*([A-ZА-ЯЁ][\w\-\s«»"\']{1,40})',
+# Юр.название в кавычках — строго требуем ЗАКРЫВАЮЩУЮ кавычку, ограничиваем
+# содержимое 40 символов без вложенных кавычек. Это режет «...ООО "Бухг» (хвост
+# чужого текста без закрытия) и «...ООО "Время учёта" УНП 391824980 р...»
+# (захват соседних слов через простую жадную маску).
+_LEGAL_NAME_QUOTED_RE = re.compile(
+    r'(ООО|ОДО|ЗАО|ОАО|ЧУП|ЧТУП|УП|ПАО|АО)\s*'
+    r'(?:«([^«»\n\r]{2,40})»|"([^"\n\r]{2,40})"|“([^”\n\r]{2,40})”)',
     re.UNICODE,
 )
+# Резервный вариант: «ООО SingleWord» (одно слово без кавычек) — например,
+# «ООО АудитПлюс». Жадности не даём — ровно одно слово.
+_LEGAL_NAME_BARE_RE = re.compile(
+    r'(ООО|ОДО|ЗАО|ОАО|ЧУП|ЧТУП|УП|ПАО|АО)\s+'
+    r'([А-ЯЁA-Z][а-яёa-zA-Z0-9\-]{2,30})\b',
+    re.UNICODE,
+)
+# ИП — отдельный случай, форма «ИП Фамилия И.О.» (а плейсхолдеры режутся
+# is_placeholder_name). Допустим, до 3 слов после «ИП».
+_LEGAL_NAME_IP_RE = re.compile(
+    r'(ИП)\s+([А-ЯЁ][а-яё]{2,30}(?:\s+[А-ЯЁ]\.?\s*[А-ЯЁ]\.?)?)',
+    re.UNICODE,
+)
+
+# Старое имя сохраняем для совместимости (если где-то ссылаются).
+_LEGAL_NAME_RE = _LEGAL_NAME_QUOTED_RE
 
 # Шаблоны плейсхолдеров от ИИ-галлюцинаций: «ИП Иванов И.И.», «ИП Петрова О.В.»
 # — эта структура почти всегда выдуманная (учебный пример), реальные имена ИП
@@ -163,22 +183,40 @@ _NAME_GARBAGE_TAILS = [
 
 def clean_org_name(name: Optional[str]) -> Optional[str]:
     """Чистит извлечённое название от мусора: лишних символов, хвостов меню,
-    дублей. None — если после чистки осталась пустота или явно мусор.
+    дублей, технических идентификаторов (УНП/ИНН/ОГРН). None — если после
+    чистки осталась пустота или явно мусор (CSS-классы, файлы).
     """
     if not name:
         return None
     s = re.sub(r"\s+", " ", name).strip(" \t\r\n.,;:|/\\—–-«»\"'")
     if not s:
         return None
+
+    # Отсев CSS-классов и техимён файлов (alt вида «logo_main», «site-logo», «img_logo»).
+    s_low_full = s.lower()
+    if re.match(r'^(logo|лого|site|img|icon|header|footer|banner|brand|nav|main)[_\- ]', s_low_full):
+        return None
+    if re.fullmatch(r'[a-z][a-z0-9_\-]{2,20}', s_low_full) and ("_" in s_low_full or "-" in s_low_full):
+        # «logo_main», «site-logo», «img_top» — типичный CSS, не бренд
+        return None
+
+    # Срезаем хвост с УНП/ИНН/ОГРН и подобными идентификаторами
+    s = re.split(r'\b(УНП|ИНН|ОГРН|ОКПО|БИК|КПП|УНН)\b', s, maxsplit=1)[0].strip()
+
     # Обрезаем по первому хвосту меню («ООО Аудит-Плюс Главная О ком...» → «ООО Аудит-Плюс»)
     s_low = s.lower()
     cut_at = len(s)
     for tail in _NAME_GARBAGE_TAILS:
         idx = s_low.find(tail)
-        # хвост должен быть отдельным словом, не подстрокой («Главная», а не «главный»).
         if idx > 0 and (s_low[idx - 1] in " \t|/—–-«»\"'"):
             cut_at = min(cut_at, idx)
+    # Дополнительно режем по типичным фразам-склейкам шапки/футера
+    for stop_phrase in (" мы находимся", " создание сайт", " ©", " все права"):
+        idx = s_low.find(stop_phrase)
+        if idx > 0:
+            cut_at = min(cut_at, idx)
     s = s[:cut_at].strip(" \t\r\n.,;:|/\\—–-«»\"'")
+
     # Жёсткая обрезка длины (заголовок страницы целиком — это уже не имя).
     if len(s) > 50:
         s = s[:50].strip()
@@ -188,6 +226,9 @@ def clean_org_name(name: Optional[str]) -> Optional[str]:
     half = len(s) // 2
     if s[:half].strip() == s[half:].strip(" ") and half > 4:
         s = s[:half].strip()
+    # Финально: имя из >5 слов почти всегда мусор (даже после чисток).
+    if len(s.split()) > 5:
+        return None
     return s or None
 
 
@@ -342,19 +383,31 @@ def _extract_org_name(soup: BeautifulSoup, url: str) -> Optional[str]:
         alt = (img.get("alt") or "").strip()
         cls = " ".join(img.get("class") or []).lower()
         if alt and ("logo" in cls or "logo" in (img.get("id") or "").lower() or "лого" in alt.lower() or "logo" in alt.lower()):
-            raw = re.sub(r"(?i)\b(логотип|logo|лого)\b", "", alt).strip(" -—|")
+            raw = re.sub(r"(?i)\b(логотип|logo|лого)\b", "", alt).strip(" -—|_")
+            # CSS-классоподобные хвосты («main», «top», «header», слова из 2-3 символов) — мусор.
+            raw_low = raw.lower()
+            if not raw or raw_low in ("main", "top", "bottom", "header", "footer", "site", "image", "icon"):
+                continue
             cand = clean_org_name(raw)
             if cand and not looks_generic_name(cand) and not is_placeholder_name(cand):
                 return cand
 
-    # 4. юр.название из подвала
+    # 4. юр.название из подвала — пробуем СТРОГИЕ регексы по очереди.
+    # Только в кавычках («Время Учёта»), либо «ООО SingleWord», либо «ИП Фамилия И.О.».
+    # Жадные/слабые паттерны убраны — раньше из-за них захватывался хвост «УНП ... р».
     footer = soup.find("footer")
     footer_text = (footer.get_text(" ", strip=True) if footer else soup.get_text(" ", strip=True))[:3000]
-    m = _LEGAL_NAME_RE.search(footer_text)
-    if m:
-        legal_raw = (m.group(1) + " " + m.group(2))
+    for rx in (_LEGAL_NAME_QUOTED_RE, _LEGAL_NAME_BARE_RE, _LEGAL_NAME_IP_RE):
+        m = rx.search(footer_text)
+        if not m:
+            continue
+        # У _LEGAL_NAME_QUOTED_RE 4 группы (одна из 3 кавычек) — берём непустую.
+        groups = [g for g in m.groups()[1:] if g]
+        if not groups:
+            continue
+        legal_raw = f"{m.group(1)} «{groups[0].strip()}»"
         cand = clean_org_name(legal_raw)
-        if cand and not is_placeholder_name(cand):
+        if cand and not is_placeholder_name(cand) and not looks_generic_name(cand):
             return cand
 
     return None
