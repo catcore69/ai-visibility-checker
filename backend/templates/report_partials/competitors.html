@@ -69,8 +69,12 @@
     {% endfor %}
   </table>
 
-  <!-- Сводная таблица: Score, Presence, SoV, Sentiment по каждому -->
-  <h3 class="meth-h3" style="margin-top: 8mm;">Полные цифры</h3>
+  {# Итер-3 Задача 69: две секции вместо одной общей таблицы — снимает «cognitive
+     wrongness», когда в одном списке витебский ИП и Контур. Клиент видит:
+     1) кого ИИ В ПРИНЦИПЕ называет в нише (может быть Контур, vc.ru, крупные)
+     2) ваши ПРЯМЫЕ региональные конкуренты (из выдачи, того же типа). #}
+  {% macro brand_table(items, eyebrow) -%}
+  <h3 class="meth-h3" style="margin-top: 8mm;">{{ eyebrow }}</h3>
   <table>
     <thead>
       <tr>
@@ -83,16 +87,14 @@
       </tr>
     </thead>
     <tbody>
-      {% for brand in competitor_comparison %}
+      {% for brand in items %}
       <tr {% if brand.is_client %}class="client-row"{% endif %}>
         <td>
           {% if brand.is_client %}★ {% endif %}<strong>{{ brand.name }}</strong>
           {% if brand.is_client %}<br><span class="meth-muted">(ваш бренд)</span>{% endif %}
         </td>
         <td style="text-align:center;">
-          <strong style="color: {% if brand.is_client %}#A63D3D{% else %}#15171A{% endif %};">
-            {{ brand.score }}
-          </strong>
+          <strong style="color: {% if brand.is_client %}#A63D3D{% else %}#15171A{% endif %};">{{ brand.score }}</strong>
         </td>
         <td style="text-align:center;">{{ brand.presence_rate }}%</td>
         <td style="text-align:center;">{{ brand.sov | default(0) }}%</td>
@@ -110,6 +112,27 @@
       {% endfor %}
     </tbody>
   </table>
+  {%- endmacro %}
+
+  {% if has_ai_competitors %}
+    {{ brand_table(ai_competitor_comparison, "Кого ИИ называет в вашей нише") }}
+    <p class="meth-muted" style="font-size:9pt; margin-top:2mm;">
+      Бренды, которые сами ИИ-модели упомянули в ответах. Могут быть крупными
+      или непрямыми — это AI-видимость в категории, не обязательно ваши региональные конкуренты.
+    </p>
+  {% endif %}
+
+  {% if has_direct_competitors %}
+    {{ brand_table(direct_competitor_comparison, "Ваши прямые конкуренты") }}
+    <p class="meth-muted" style="font-size:9pt; margin-top:2mm;">
+      Реальные компании из выдачи в вашем регионе, оказывающие ту же услугу
+      (сайт открывается, страна и категория совпадают с вашими).
+    </p>
+  {% endif %}
+
+  {% if not has_ai_competitors and not has_direct_competitors %}
+    {{ brand_table(competitor_comparison, "Полные цифры") }}
+  {% endif %}
 
   <!-- Где конкуренты обходят клиента — приоритеты роста -->
   {% if worst_prompts %}

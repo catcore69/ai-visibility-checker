@@ -636,18 +636,22 @@ async def build_competitor_list(
     client_competitors: Optional[list[str]],
     raw_responses: dict,
     count: int = 5,
-) -> tuple[list[str], str]:
+) -> tuple[list[str], str, dict[str, str]]:
     """Итерация-3, Задача 1.4: список конкурентов ТОЛЬКО из реальных данных.
 
     Приоритет: 1) ссылки клиента → 2) реально упомянутые в ответах ИИ (с
     проверкой реальным сайтом) → 3) реальная поисковая выдача. Никакого LLM
     «из головы». Если реальных <3 → source="sparse" (ниша свободна).
+
+    Возвращает (names, overall_source, per_name_source_map). Per-name source:
+    "client" / "ai_mentioned" / "serp_direct" — используется для разделения
+    конкурентов в PDF на «Кого ИИ называет» vs «Ваши прямые конкуренты».
     """
     region = niche.get("region", "")
     client_list = _normalize_client_competitors(client_competitors, brand_name)[:count]
     if len(client_list) >= count:
         logger.info("competitors_from_client_only", count=len(client_list), brand=brand_name)
-        return client_list[:count], "client"
+        return client_list[:count], "client", {n: "client" for n in client_list[:count]}
 
     # Источник А — реально упомянутые ИИ бренды, верифицированные живым сайтом
     # ПЛЮС жёсткие проверки: настоящее имя с сайта, не плейсхолдер, регион клиента,
@@ -717,13 +721,24 @@ async def build_competitor_list(
     merged = _merge_dedupe(client_list, ai_verified, count)
     merged = _merge_dedupe(merged, serp, count)
 
+    # Карта «имя → откуда взяли»: приоритет client > ai > serp.
+    sources_map: dict[str, str] = {}
+    for n in client_list:
+        sources_map.setdefault(n.lower(), "client")
+    for n in ai_verified:
+        sources_map.setdefault(n.lower(), "ai_mentioned")
+    for n in serp:
+        sources_map.setdefault(n.lower(), "serp_direct")
+    # Преобразуем в map по исходным именам.
+    per_name = {n: sources_map.get(n.lower(), "serp_direct") for n in merged[:count]}
+
     if len(merged) >= 3:
         source = "client" if (client_list and not ai_verified and not serp) else "verified"
-        return merged[:count], source
+        return merged[:count], source, per_name
 
     # Реальных конкурентов <3 → честный сигнал «ниша свободна».
     logger.info("competitors_sparse", count=len(merged), brand=brand_name)
-    return merged[:count], "sparse"
+    return merged[:count], "sparse", per_name
 
 
 async def find_competitors(

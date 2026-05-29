@@ -280,6 +280,27 @@ async def build_and_upload_pdf(report, analysis: Analysis, competitors: list[str
     all_brands = [brand_name] + competitors
 
     comparison = compare_with_competitors(analysis, brand_name, all_brands)
+
+    # Итер-3 Задача 69: разделение конкурентов в PDF.
+    # Источник «откуда взяли каждого» лежит в niche_data.competitor_sources.
+    _csources = {}
+    if isinstance(report.niche_data, dict):
+        _csources = report.niche_data.get("competitor_sources") or {}
+    _csources_lc = {k.lower(): v for k, v in _csources.items()} if isinstance(_csources, dict) else {}
+    for item in comparison:
+        if item.get("is_client"):
+            item["source"] = "client_self"
+        else:
+            item["source"] = _csources_lc.get((item.get("name") or "").lower(), "serp_direct")
+    ai_comparison = [c for c in comparison if c.get("source") == "ai_mentioned"]
+    direct_comparison = [c for c in comparison if c.get("source") in ("serp_direct", "client")]
+    # Клиент всегда в обеих секциях (для контекста сравнения).
+    client_row = next((c for c in comparison if c.get("is_client")), None)
+    if client_row:
+        if not any(c.get("is_client") for c in ai_comparison):
+            ai_comparison.insert(0, client_row)
+        if not any(c.get("is_client") for c in direct_comparison):
+            direct_comparison.insert(0, client_row)
     model_breakdown = get_model_breakdown(analysis, brand_name)
     top_sources = get_top_sources(analysis)
     worst_prompts = _get_worst_prompts(analysis, brand_name, competitors)
@@ -399,6 +420,11 @@ async def build_and_upload_pdf(report, analysis: Analysis, competitors: list[str
         # Аналитика
         "comparison": comparison,
         "competitor_comparison": comparison,
+        # Итер-3 Задача 69: две секции — кого ИИ называет vs прямые из выдачи.
+        "ai_competitor_comparison": ai_comparison,
+        "direct_competitor_comparison": direct_comparison,
+        "has_ai_competitors": any(not c.get("is_client") for c in ai_comparison),
+        "has_direct_competitors": any(not c.get("is_client") for c in direct_comparison),
         "model_breakdown": model_breakdown,
         "top_sources": top_sources[:10],
         "worst_prompts": worst_prompts,
