@@ -146,6 +146,57 @@ _LEGAL_NAME_RE = re.compile(
     re.UNICODE,
 )
 
+# Шаблоны плейсхолдеров от ИИ-галлюцинаций: «ИП Иванов И.И.», «ИП Петрова О.В.»
+# — эта структура почти всегда выдуманная (учебный пример), реальные имена ИП
+# обычно с полным отчеством или нетипичной фамилией. Выкидываем.
+_PLACEHOLDER_IP_RE = re.compile(
+    r'^\s*(ип|чтуп|унп|унн)\s+[а-яё]+(?:а|ова|ев|ева|ин|ина|ский|ская)\s+[а-яё]\.\s*[а-яё]\.\s*$',
+    re.IGNORECASE | re.UNICODE,
+)
+
+# Мусорные хвосты в org_name, когда экстрактор зацепил кусок меню/футера.
+_NAME_GARBAGE_TAILS = [
+    "главная", "о компании", "о нас", "контакты", "услуги", "цены", "прайс",
+    "menu", "home", "about", "contacts", "новости", "блог",
+]
+
+
+def clean_org_name(name: Optional[str]) -> Optional[str]:
+    """Чистит извлечённое название от мусора: лишних символов, хвостов меню,
+    дублей. None — если после чистки осталась пустота или явно мусор.
+    """
+    if not name:
+        return None
+    s = re.sub(r"\s+", " ", name).strip(" \t\r\n.,;:|/\\—–-«»\"'")
+    if not s:
+        return None
+    # Обрезаем по первому хвосту меню («ООО Аудит-Плюс Главная О ком...» → «ООО Аудит-Плюс»)
+    s_low = s.lower()
+    cut_at = len(s)
+    for tail in _NAME_GARBAGE_TAILS:
+        idx = s_low.find(tail)
+        # хвост должен быть отдельным словом, не подстрокой («Главная», а не «главный»).
+        if idx > 0 and (s_low[idx - 1] in " \t|/—–-«»\"'"):
+            cut_at = min(cut_at, idx)
+    s = s[:cut_at].strip(" \t\r\n.,;:|/\\—–-«»\"'")
+    # Жёсткая обрезка длины (заголовок страницы целиком — это уже не имя).
+    if len(s) > 50:
+        s = s[:50].strip()
+    if not s or len(s) < 2:
+        return None
+    # Удаляем дубль типа «ООО Аудит-Плюс ООО Аудит-Плюс» (часто от og:title)
+    half = len(s) // 2
+    if s[:half].strip() == s[half:].strip(" ") and half > 4:
+        s = s[:half].strip()
+    return s or None
+
+
+def is_placeholder_name(name: str) -> bool:
+    """True для шаблонов ИИ-галлюцинаций «ИП Иванов И.И.» и подобных."""
+    if not name:
+        return True
+    return bool(_PLACEHOLDER_IP_RE.match(name.strip()))
+
 # Родовые/служебные слова. «Generic» — это когда ВСЕ значимые слова отсюда
 # (чистая категория «Бухгалтерские услуги»). Если есть хоть один собственный
 # токен («Время», «ЛюксБаланс») — это бренд, НЕ generic.
@@ -263,26 +314,27 @@ def _org_name_from_jsonld(soup: BeautifulSoup) -> Optional[str]:
 
 
 def _extract_org_name(soup: BeautifulSoup, url: str) -> Optional[str]:
-    """Реальное название компании по приоритету источников (Итерация-2, А3).
+    """Реальное название компании по приоритету источников.
 
     1. schema.org Organization → name
     2. og:site_name
     3. logo alt / название в шапке
     4. юр.название из подвала (ООО «…», ЧУП «…»)
-    НЕ используем <title> — это источник SEO-фраз, а не брендов.
-    Возвращает None, если ничего конкретного не нашли (caller оставит исходное/домен).
+    НЕ используем <title> — там SEO-фразы. Каждый кандидат прогоняем
+    через clean_org_name (Итер-3: режем хвосты меню, дубли, длину >50).
+    Возвращает None, если ничего конкретного не нашли.
     """
     # 1. schema.org Organization
-    name = _org_name_from_jsonld(soup)
-    if name and not looks_generic_name(name):
-        return name[:80]
+    name = clean_org_name(_org_name_from_jsonld(soup))
+    if name and not looks_generic_name(name) and not is_placeholder_name(name):
+        return name
 
     # 2. og:site_name
     og = soup.find("meta", attrs={"property": "og:site_name"})
     if og and og.get("content"):
-        cand = og["content"].strip()
-        if cand and not looks_generic_name(cand):
-            return cand[:80]
+        cand = clean_org_name(og["content"])
+        if cand and not looks_generic_name(cand) and not is_placeholder_name(cand):
+            return cand
 
     # 3. logo alt в шапке
     header = soup.find("header") or soup
@@ -290,21 +342,69 @@ def _extract_org_name(soup: BeautifulSoup, url: str) -> Optional[str]:
         alt = (img.get("alt") or "").strip()
         cls = " ".join(img.get("class") or []).lower()
         if alt and ("logo" in cls or "logo" in (img.get("id") or "").lower() or "лого" in alt.lower() or "logo" in alt.lower()):
-            cand = re.sub(r"(?i)\b(логотип|logo|лого)\b", "", alt).strip(" -—|")
-            if cand and not looks_generic_name(cand):
-                return cand[:80]
+            raw = re.sub(r"(?i)\b(логотип|logo|лого)\b", "", alt).strip(" -—|")
+            cand = clean_org_name(raw)
+            if cand and not looks_generic_name(cand) and not is_placeholder_name(cand):
+                return cand
 
     # 4. юр.название из подвала
     footer = soup.find("footer")
     footer_text = (footer.get_text(" ", strip=True) if footer else soup.get_text(" ", strip=True))[:3000]
     m = _LEGAL_NAME_RE.search(footer_text)
     if m:
-        legal = (m.group(1) + " " + m.group(2)).strip()
-        legal = re.sub(r"\s+", " ", legal)[:80]
-        if legal:
-            return legal
+        legal_raw = (m.group(1) + " " + m.group(2))
+        cand = clean_org_name(legal_raw)
+        if cand and not is_placeholder_name(cand):
+            return cand
 
     return None
+
+
+def country_from_site(url: str, text: str) -> str:
+    """Итерация-3, Задача 4: страна сайта по жёстким сигналам (для проверки,
+    что конкурент в той же стране, что и клиент). Используем TLD и токены
+    городов/стран из region_detector.
+
+    Возвращает «Беларусь»/«Россия»/... либо "" если сигналов нет.
+    """
+    try:
+        import tldextract
+        from app.core.region_detector import TLD_COUNTRY, CITY_COUNTRY
+    except Exception:
+        return ""
+
+    # 1) TLD — самый сильный сигнал
+    try:
+        ext = tldextract.extract(url or "")
+        tld = (ext.suffix or "").lower()
+        if tld in TLD_COUNTRY:
+            return TLD_COUNTRY[tld]
+        # tld может быть составным (com.by → suffix='com.by') — берём «хвост».
+        if "." in tld:
+            last = tld.rsplit(".", 1)[-1]
+            if last in TLD_COUNTRY:
+                return TLD_COUNTRY[last]
+    except Exception:
+        pass
+
+    # 2) Сигналы в тексте (страны и города)
+    t = (text or "").lower()
+    scores: dict[str, int] = {}
+    explicit = [
+        ("беларус", "Беларусь"), ("республика беларусь", "Беларусь"),
+        ("россии", "Россия"), ("российской федерации", "Россия"),
+        ("россия", "Россия"), ("украин", "Украина"),
+        ("казахстан", "Казахстан"),
+    ]
+    for kw, country in explicit:
+        if kw in t:
+            scores[country] = scores.get(country, 0) + 3
+    for city, country in CITY_COUNTRY.items():
+        if city in t:
+            scores[country] = scores.get(country, 0) + 1
+    if scores:
+        return max(scores.items(), key=lambda kv: kv[1])[0]
+    return ""
 
 
 def _detect_faq_block(soup: BeautifulSoup) -> bool:

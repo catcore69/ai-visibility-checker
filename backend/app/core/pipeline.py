@@ -234,19 +234,32 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
                 if isinstance(report.client_competitors, list)
                 else None
             )
-            competitors, competitors_source = await build_competitor_list(
+            competitors, competitors_source, competitor_sources_map = await build_competitor_list(
                 niche,
                 brand_name=report.brand_name,
                 client_competitors=client_competitors,
                 raw_responses=raw_responses,
                 count=settings.COMPETITORS_PER_REPORT,
             )
-            await update_report_field(
-                db,
-                report_id,
-                competitors=competitors,
-                competitors_source=competitors_source,
-            )
+            # Итер-3 Задача 69: per-name source кладём в niche_data, чтобы PDF
+            # делил конкурентов на «Кого ИИ называет» vs «Прямые из выдачи».
+            try:
+                _niche_with_sources = dict(niche)
+                _niche_with_sources["competitor_sources"] = competitor_sources_map or {}
+                await update_report_field(
+                    db, report_id,
+                    niche_data=_niche_with_sources,
+                    competitors=competitors,
+                    competitors_source=competitors_source,
+                )
+                niche = _niche_with_sources
+            except Exception as exc:
+                logger.warning("competitor_sources_save_failed", error=str(exc))
+                await update_report_field(
+                    db, report_id,
+                    competitors=competitors,
+                    competitors_source=competitors_source,
+                )
 
         # ===== ШАГ 5.6: Анализ сайтов клиента и конкурентов (Этап 2 ТЗ) =====
         # Делаем параллельно, исключения внутри analyze_site не роняют pipeline.
