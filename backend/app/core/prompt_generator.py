@@ -191,33 +191,61 @@ def _build_query_seeds(niche: dict[str, Any]) -> list[str]:
     return out
 
 
-async def _xmlriver_suggest(query: str) -> list[str]:
-    """Реальные автоподсказки поиска через XMLRiver. Возвращает список фраз."""
+async def _xmlriver_tips_batch(phrases: list[str], region: str = "") -> list[str]:
+    """Реальные поисковые подсказки через XMLRiver api-tips (правильный эндпоинт).
+
+    Документация: POST на /search/xml с setab=tips + гео-параметрами + JSON-body.
+    ВНИМАНИЕ: оплата ЗА КАЖДУЮ фразу в запросе (батчим осторожно). Логируем
+    sent_phrases, чтобы контролировать расходы.
+    """
     if not settings.XMLRIVER_USER or not settings.XMLRIVER_KEY:
         return []
+    phrases = [p for p in (phrases or []) if p and p.strip()][:50]
+    if not phrases:
+        return []
+    # Гео-параметр lr берём по региону клиента (БЕЛОРУССКИЙ КЛИЕНТ → БЕЛОРУССКИЕ
+    # ПОДСКАЗКИ, а не РФ по дефолту). Это критично для региональной релевантности.
+    is_by = any(s in (region or "").lower() for s in ("беларус", "рб", "by"))
+    lr = settings.XMLRIVER_REGION_BY if is_by else settings.XMLRIVER_REGION_RU
     try:
         async with httpx.AsyncClient(timeout=15.0) as c:
-            resp = await c.get(
-                "https://xmlriver.com/suggest/xml",
+            resp = await c.post(
+                "https://xmlriver.com/search/xml",
                 params={
+                    "setab": "tips",
                     "user": settings.XMLRIVER_USER,
                     "key": settings.XMLRIVER_KEY,
-                    "query": query,
+                    "lr": lr,
                 },
+                json={"phrases": phrases},
             )
             resp.raise_for_status()
-        root = ET.fromstring(resp.text)
-        # XML может быть {<root><sug>фраза</sug><sug>...</sug></root>} или иначе —
-        # берём ВСЕ текстовые узлы listа.
-        out: list[str] = []
-        for el in root.iter():
-            txt = (el.text or "").strip()
-            if txt and len(txt) > 5 and len(txt) < 200 and " " in txt:
-                out.append(txt)
-        return out[:30]
+        data = resp.json()
     except Exception as exc:
-        logger.warning("xmlriver_suggest_error", query=query, error=str(exc))
+        logger.warning("xmlriver_tips_error", count=len(phrases), error=str(exc))
         return []
+
+    logger.info(
+        "xmlriver_tips_sent",
+        sent_phrases=len(phrases),  # ← по документации оплата ЗА КАЖДУЮ фразу
+        lr=lr,
+        region=region or "default",
+    )
+
+    if isinstance(data, dict):
+        out = data.get("phrases") or data.get("tips") or []
+    elif isinstance(data, list):
+        out = data
+    else:
+        out = []
+    return [s.strip() for s in out if isinstance(s, str) and s.strip()][:60]
+
+
+async def _xmlriver_suggest(query: str, region: str = "") -> list[str]:
+    """Совместимость со старой сигнатурой: одна фраза → tips-batch на 1 элемент.
+    Внутри это уже корректный POST на /search/xml?setab=tips, не GET на /suggest/xml.
+    """
+    return await _xmlriver_tips_batch([query], region=region)
 
 
 async def _xmlriver_wordstat(query: str) -> list[str]:
@@ -272,10 +300,14 @@ async def _fetch_real_queries(niche: dict[str, Any]) -> list[str]:
     region_l = (niche.get("region") or "").lower()
     is_rf = "росси" in region_l or "рф" in region_l
 
+    region = niche.get("region", "") or ""
     tasks: list = []
+    # Google suggest — отдельные запросы (открытый API, без оплаты за фразу).
     for seed in seeds:
-        tasks.append(_google_suggest(seed))    # Google suggest
-        tasks.append(_xmlriver_suggest(seed))  # Yandex suggest через XMLRiver
+        tasks.append(_google_suggest(seed))
+    # Яндекс tips — ОДИН батч-POST на все сиды (оплата всё равно за фразу,
+    # но HTTP-запрос один, плюс гео-параметр прокидывается из региона клиента).
+    tasks.append(_xmlriver_tips_batch(seeds, region=region))
     # Wordstat доступен только для РФ-регионов (по конфигу XMLRiver).
     if is_rf:
         for seed in seeds[:3]:

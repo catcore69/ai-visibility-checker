@@ -5,17 +5,20 @@ import { Logo } from '@/components/Logo';
 export const metadata = {
   title: 'Проверить AI Visibility бренда — CatCore GEO Studio',
   description:
-    'Бесплатная проверка: как часто ИИ-ассистенты упоминают ваш бренд. Получите PDF-отчёт с анализом ChatGPT, YandexGPT, GigaChat, Gemini и других.',
+    'Бесплатная проверка: как часто ИИ-ассистенты упоминают ваш бренд. Получите PDF-отчёт с анализом YandexGPT, GigaChat, Яндекс-поиска с AI-блоком, Google AI Overview, ChatGPT, Gemini и DeepSeek.',
 };
 
+// Порядок отображения — заявленное должно равняться фактическому опросу
+// (см. ENABLED_MODELS в backend/app/config.py). Perplexity временно отключена
+// по стоимости — её код в поллерах сохранён.
 const MODELS = [
-  'ChatGPT',
   'YandexGPT',
-  'GigaChat',
-  'Gemini',
-  'Perplexity',
-  'DeepSeek',
+  'GigaChat (Сбер)',
   'Яндекс-поиск с AI-блоком',
+  'Google AI Overview',
+  'ChatGPT',
+  'Gemini',
+  'DeepSeek',
 ];
 
 const BENEFITS = [

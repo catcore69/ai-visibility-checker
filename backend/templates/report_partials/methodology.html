@@ -33,20 +33,27 @@
     {% endif %}
   </p>
 
-  <!-- Какие модели и как опрашивали -->
+  <!-- Какие модели и как опрашивали. Порядок: сначала Яндекс-стек (включая
+       AI-блок выдачи), потом Google-стек (включая Overview), потом остальные. -->
   <h3 class="meth-h3">Какие модели опрашивали</h3>
   <ul class="meth-list">
-    <li><strong>ChatGPT</strong> — gpt-4o-mini через API OpenAI.</li>
     <li><strong>YandexGPT</strong> — прямой API Yandex Cloud Foundation Models.</li>
+    <li><strong>GigaChat (Сбер)</strong> — прямой API Сбера.</li>
     <li>
       <strong>Яндекс-поиск с AI-блоком</strong> — парсинг поисковой выдачи Яндекса
       с AI-сгенерированным блоком через XMLRiver SERP API. Это то, что видит пользователь,
       когда ищет в Яндексе с AI-блоком.
     </li>
-    <li><strong>GigaChat</strong> — прямой API Сбера.</li>
+    <li>
+      <strong>Google AI Overview (Обзор от ИИ)</strong> — AI-блок, который Google
+      показывает в поисковой выдаче. Мы парсим его через XMLRiver. Google показывает
+      этот блок не на всех запросах (особенно на русскоязычных региональных), поэтому
+      если по части запросов AI Overview не показан — это отражает реальную выдачу,
+      а не пропуск в анализе.
+    </li>
+    <li><strong>ChatGPT</strong> — gpt-4o-mini через API OpenAI.</li>
     <li><strong>Gemini</strong> — прямой API Google.</li>
     <li><strong>DeepSeek</strong> — прямой API DeepSeek.</li>
-    <li><strong>Perplexity</strong> — прямой API Perplexity.</li>
   </ul>
 
   <!-- А что с Алисой — снимаем уязвимость честной формулировкой -->

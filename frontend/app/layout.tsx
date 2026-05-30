@@ -4,7 +4,7 @@ import './globals.css';
 export const metadata: Metadata = {
   title: 'CatCore — AI Visibility Checker',
   description:
-    'Бесплатный инструмент CatCore GEO Studio: проверьте, как ИИ-ассистенты (ChatGPT, YandexGPT, GigaChat, Gemini и др.) видят ваш бренд по сравнению с конкурентами.',
+    'Бесплатный инструмент CatCore GEO Studio: проверьте, как ИИ-ассистенты (YandexGPT, GigaChat, Яндекс-поиск с AI-блоком, Google AI Overview, ChatGPT, Gemini, DeepSeek) видят ваш бренд по сравнению с конкурентами.',
   icons: { icon: '/favicon.ico' },
   openGraph: {
     title: 'CatCore — AI Visibility Checker',
