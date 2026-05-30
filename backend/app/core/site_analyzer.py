@@ -199,6 +199,12 @@ def clean_org_name(name: Optional[str]) -> Optional[str]:
     if re.fullmatch(r'[a-z][a-z0-9_\-]{2,20}', s_low_full) and ("_" in s_low_full or "-" in s_low_full):
         # «logo_main», «site-logo», «img_top» — типичный CSS, не бренд
         return None
+    # Отсев имени, которое выглядит как доменное имя («buhvitebsk.by», «pravoved.ru»).
+    # Реальный бренд так почти никогда не записывают (если хотят показать домен —
+    # обычно через "Имя | example.com"). Кириллица в имени → не считаем доменом
+    # (например, «Правовед.RU» сохраним — режется уже регион-проверкой).
+    if re.fullmatch(r'[a-z][a-z0-9\-]{1,40}\.[a-z]{2,8}', s_low_full):
+        return None
 
     # Срезаем хвост с УНП/ИНН/ОГРН и подобными идентификаторами
     s = re.split(r'\b(УНП|ИНН|ОГРН|ОКПО|БИК|КПП|УНН)\b', s, maxsplit=1)[0].strip()
