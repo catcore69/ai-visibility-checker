@@ -463,7 +463,7 @@ async def _find_competitors_via_serp(
     seen_names: set[str] = set()
     rej_off_topic = 0
     rej_wrong_country = 0
-    rej_no_name = 0
+    rej_no_real_site = 0
     rej_generic = 0
     for u, summ in zip(real_urls, summaries):
         if not isinstance(summ, dict):
@@ -471,33 +471,37 @@ async def _find_competitors_via_serp(
         text = summ.get("text") or ""
         org_name = (summ.get("org_name") or "").strip()
 
-        # Конъюнктивный confidence-фильтр (Итер-3, Задача 4):
-        # сайт + НАСТОЯЩЕЕ имя + регион + категория. Не прошёл хоть одно → не конкурент.
+        # Конъюнктивный confidence-фильтр. Сначала проверяем, что САЙТ нам подходит
+        # (регион + категория), и ТОЛЬКО ПОТОМ решаем по имени. Если сайт реальный
+        # и наш, но имя метаданных мусорное — оставляем кандидата с доменом-меткой,
+        # а не теряем реального конкурента (buhvitebsk.by — реальная фирма).
 
-        # 1. Реальное имя обязательно. БЕЗ fallback на slug домена (был «Vitebsk»).
-        if not org_name:
-            rej_no_name += 1
-            continue
-        # 2. Имя не должно быть generic/плейсхолдером
-        if looks_generic_name(org_name) or is_placeholder_name(org_name):
-            rej_generic += 1
-            continue
-        # 3. Регион сайта должен совпадать с клиентским (закрывает тёзок из РФ)
+        # 1. Регион сайта = регион клиента (TLD + сигналы текста).
         if client_country:
             site_country = country_from_site(u, text)
             if site_country and site_country != client_country:
                 rej_wrong_country += 1
                 continue
-        # 4. Категория сайта должна совпадать с услугой клиента (Т-Банк → ✗)
+        # 2. Категория сайта = категория клиента (стемы повторяются ≥2 раз).
         if not _site_matches_category(text, keywords):
             rej_off_topic += 1
             continue
 
-        nl = org_name.lower()
+        # 3. Имя. Реальное название с сайта (clean_org_name уже отсеяла CSS/домены)
+        # имеет приоритет. Если не нашли — берём домен как ЧЕСТНУЮ метку, не выдумываем.
+        name = org_name or (_domain_of(u) or "").lower()
+        if not name:
+            rej_no_real_site += 1
+            continue
+        if looks_generic_name(name) or is_placeholder_name(name):
+            rej_generic += 1
+            continue
+
+        nl = name.lower()
         if nl in excl_lower or nl in seen_names:
             continue
         seen_names.add(nl)
-        out.append(org_name)
+        out.append(name)
         if len(out) >= count:
             break
 
@@ -695,38 +699,37 @@ async def build_competitor_list(
         summaries = await asyncio.gather(
             *[fetch_site_summary(u) for _, u in valid_pairs], return_exceptions=True
         )
-        rej_no_name = rej_wrong_country = rej_off_topic = rej_generic = 0
+        rej_wrong_country = rej_off_topic = rej_generic = 0
         for (orig_name, u), summ in zip(valid_pairs, summaries):
             if not isinstance(summ, dict):
                 continue
             text = summ.get("text") or ""
             site_name = (summ.get("org_name") or "").strip()
 
-            # 1. Настоящее имя с сайта — обязательно (без него кандидат подозрительный).
-            if not site_name:
-                rej_no_name += 1
-                continue
-            if looks_generic_name(site_name) or is_placeholder_name(site_name):
-                rej_generic += 1
-                continue
-            # 2. Страна сайта должна совпадать с клиентом.
+            # Сначала проверяем сайт (регион + категория), потом решаем по имени.
+            # 1. Страна сайта = клиенту.
             if client_country:
                 site_country = country_from_site(u, text)
                 if site_country and site_country != client_country:
                     rej_wrong_country += 1
                     continue
-            # 3. Категория должна совпадать.
+            # 2. Категория совпадает.
             if not _site_matches_category(text, keywords):
                 rej_off_topic += 1
                 continue
-
-            ai_verified.append(site_name)
+            # 3. Имя: настоящее с сайта в приоритете; если нет — оригинальное
+            # от ИИ (оно уже прошло is_placeholder_name выше); если и его нет —
+            # домен как честная метка. Реального конкурента не теряем.
+            name = site_name or orig_name or (_domain_of(u) or "").lower()
+            if not name or looks_generic_name(name) or is_placeholder_name(name):
+                rej_generic += 1
+                continue
+            ai_verified.append(name)
         logger.info(
             "competitors_from_ai_verified",
             candidates=len(ai_names),
             with_url=len(valid_pairs),
             verified=len(ai_verified),
-            rej_no_name=rej_no_name,
             rej_generic=rej_generic,
             rej_wrong_country=rej_wrong_country,
             rej_off_topic=rej_off_topic,
