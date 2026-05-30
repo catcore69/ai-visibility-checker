@@ -427,12 +427,15 @@ async def _find_competitors_via_serp(
         country_from_site,
     )
 
-    category = niche.get("category", "")
+    # Узкая ниша приоритетнее общей категории: для магазина аккумуляторов
+    # «Аккумуляторы для транспорта Минск» даст реальных продавцов,
+    # а «Автоаксессуары Минск» — мусор от всех смежных магазинов.
+    cat = niche.get("category", "") or ""
+    sub = niche.get("subcategory", "") or ""
+    primary = sub.strip() or cat.strip()
     region = niche.get("region", "")
     city = _city_from_region(region) or region
-    # Чистый запрос: «{категория} {город}». Без подкатегории и без «, Беларусь» —
-    # длинные хвосты гробят выдачу (раньше получали 0 результатов).
-    query = " ".join(p for p in [category, city] if p).strip()
+    query = " ".join(p for p in [primary, city] if p).strip()
     if not query:
         return []
 
@@ -526,16 +529,22 @@ async def _find_competitors_via_serp(
 
 
 def _category_keywords(niche: dict[str, Any]) -> list[str]:
-    """Итерация-3, Задача 4: отличительные стемы категории — для проверки,
-    что сайт кандидата реально про эту услугу. Грубое стемм-сокращение (6 букв),
-    выкидываем родовые слова (услуги/компания/...) — оставляем только специфичные.
-    «Бухгалтерские услуги» → ['бухгал']; «Юридические услуги» → ['юридич'].
+    """Итерация-3, Задача 4 (+v2): отличительные стемы ниши — для проверки,
+    что сайт кандидата реально про эту услугу/товар. Берём стемы И из category,
+    И из subcategory — для «Автоаксессуары / Аккумуляторы для транспорта»
+    получаем ['автоак', 'аккуму', 'транс'], то есть сайт реального магазина
+    аккумуляторов теперь пройдёт по стему «аккуму», даже если category общая.
     """
     from app.core.site_analyzer import _GENERIC_WORDS
-    raw = " ".join([niche.get("category", ""), niche.get("subcategory", "")]).lower()
+    cat = (niche.get("category") or "").strip()
+    sub = (niche.get("subcategory") or "").strip()
+    # ИЗ ОБЕИХ ЧАСТЕЙ — иначе магазин аккумуляторов не проходит фильтр
+    # по category «автоаксессуары» (стем «автоак»), хотя subcategory чётко
+    # сужает до «аккумуляторы».
+    raw = " ".join([cat, sub]).lower()
     tokens = [t.strip("«»\"'.,()-—:;") for t in raw.split() if t]
     distinctive = [t for t in tokens if t and t not in _GENERIC_WORDS and len(t) >= 5]
-    # стем = первые 6 символов (грубо, но для русского работает: «бухгалтерские»→«бухгал»).
+    # стем = первые 6 символов (грубо, но для русского работает).
     return list({t[:6] for t in distinctive})
 
 
