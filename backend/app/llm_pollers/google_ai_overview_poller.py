@@ -58,8 +58,9 @@ class GoogleAIOverviewPoller(BasePoller):
             "user": self.config.XMLRIVER_USER,
             "key": self.config.XMLRIVER_KEY,
             "query": prompt,
-            "groupby": "10",
             "country": country,
+            # groupby убран: требует loc, без него XMLRiver кидает error 104.
+            # По умолчанию вернётся топ-10 результатов.
         }
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(url, params=params)

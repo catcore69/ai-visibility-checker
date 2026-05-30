@@ -36,8 +36,8 @@ class YandexAISearchPoller(BasePoller):
             "user": self.config.XMLRIVER_USER,
             "key": self.config.XMLRIVER_KEY,
             "query": prompt,
-            "groupby": "10",
             "lr": lr,
+            # groupby убран: требует loc, без него XMLRiver кидает error 104.
             "neuro": "1",
         }
 
