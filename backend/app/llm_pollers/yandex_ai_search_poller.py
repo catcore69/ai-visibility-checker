@@ -28,7 +28,10 @@ class YandexAISearchPoller(BasePoller):
         # без локальных фирм.
         is_by = any(s in (region or "").lower() for s in ("беларус", " рб", "by"))
         lr = self.config.XMLRIVER_REGION_BY if is_by else self.config.XMLRIVER_REGION_RU
-        url = "https://xmlriver.com/search/xml"
+        # Правильный Yandex эндпоинт по документации XMLRiver — /search_yandex/xml,
+        # не /search/xml (это Google). Раньше шёл на Google эндпоинт с lr-кодами
+        # для Yandex — отсюда часть пустых ответов.
+        url = "https://xmlriver.com/search_yandex/xml"
         params = {
             "user": self.config.XMLRIVER_USER,
             "key": self.config.XMLRIVER_KEY,

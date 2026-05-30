@@ -45,10 +45,16 @@ class Settings(BaseSettings):
     GIGACHAT_AUTH_KEY: str = ""
 
     # === XMLRiver ===
+    # У XMLRiver разные гео-коды для разных движков:
+    # - Yandex: lr (Yandex region IDs). 225=Россия, 149=Беларусь.
+    # - Google: country (Google location IDs из их countries.xlsx). 2643=Russia, 2112=Belarus.
+    # Эндпоинты тоже разные: /search_yandex/xml и /search_google/xml.
     XMLRIVER_USER: str = ""
     XMLRIVER_KEY: str = ""
-    XMLRIVER_REGION_RU: str = "213"
-    XMLRIVER_REGION_BY: str = "157"
+    XMLRIVER_REGION_RU: str = "225"  # Yandex lr для России
+    XMLRIVER_REGION_BY: str = "149"  # Yandex lr для Беларуси
+    XMLRIVER_GOOGLE_COUNTRY_RU: str = "2643"  # Google country ID для России
+    XMLRIVER_GOOGLE_COUNTRY_BY: str = "2112"  # Google country ID для Беларуси
 
     # === Pipeline ===
     # Этап 2.4 ТЗ: "alisa" заменён на "yandex_ai_search" (честное имя XMLRiver SERP).

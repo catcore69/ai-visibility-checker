@@ -41,17 +41,22 @@ class GoogleAIOverviewPoller(BasePoller):
     model = "google-ai-overview"
 
     async def _query_raw(self, prompt: str, region: str = "") -> str:
-        # XMLRiver /search_google/xml ответил «Неверный параметр loc!» на
-        # country=149 — у Google-эндпоинта другая схема гео-кодов (не lr).
-        # Пока без гео-параметра: Google всё равно учитывает язык/регион
-        # из самого запроса (мы добавляем город в текст). Когда уточним
-        # правильный код XMLRiver для Google location — вернём.
+        # Google country: 2643=Россия, 2112=Беларусь (это Google geo IDs,
+        # НЕ Yandex lr). Источник: документация XMLRiver /apidoc/api-about/.
+        # Раньше шли с country=149 (Yandex lr для РБ) → ошибка «Неверный loc».
+        is_by = any(s in (region or "").lower() for s in ("беларус", " рб", "by"))
+        country = (
+            self.config.XMLRIVER_GOOGLE_COUNTRY_BY
+            if is_by
+            else self.config.XMLRIVER_GOOGLE_COUNTRY_RU
+        )
         url = "https://xmlriver.com/search_google/xml"
         params = {
             "user": self.config.XMLRIVER_USER,
             "key": self.config.XMLRIVER_KEY,
             "query": prompt,
             "groupby": "10",
+            "country": country,
         }
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(url, params=params)
