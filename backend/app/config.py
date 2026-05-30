@@ -53,10 +53,10 @@ class Settings(BaseSettings):
     # === Pipeline ===
     # Этап 2.4 ТЗ: "alisa" заменён на "yandex_ai_search" (честное имя XMLRiver SERP).
     # Порядок отображения в отчёте/на лендинге (заявленное должно равняться фактическому):
-    # YandexGPT → GigaChat → Яндекс-поиск с AI-блоком → Google AI Overview (Phase 2) →
+    # YandexGPT → GigaChat → Яндекс-поиск с AI-блоком → Google AI Overview →
     # ChatGPT → Gemini → DeepSeek. Perplexity временно отключена по стоимости
     # (код остаётся, для возврата достаточно добавить «perplexity» в .env).
-    ENABLED_MODELS: str = "yandexgpt,yandex_ai_search,gigachat,chatgpt,gemini,deepseek"
+    ENABLED_MODELS: str = "yandexgpt,yandex_ai_search,gigachat,google_ai_overview,chatgpt,gemini,deepseek"
     # Этап 1.3 ТЗ: снижено с 15 до 10 (4 рек / 3 срав / 2 проб / 1 транз)
     PROMPTS_PER_REPORT: int = 10
     COMPETITORS_PER_REPORT: int = 5
@@ -89,6 +89,7 @@ class Settings(BaseSettings):
     # Этап 2.4: переименовано из ALISA_MAX_RPM. Старое имя env-переменной
     # сохраняем через alias ниже — чтобы prod не упал, пока не обновят .env.
     YANDEX_AI_SEARCH_MAX_RPM: int = 100
+    GOOGLE_AI_OVERVIEW_MAX_RPM: int = 100
 
     # === Celery ===
     CELERY_WORKER_CONCURRENCY: int = 2
@@ -200,6 +201,7 @@ class Settings(BaseSettings):
             "chatgpt": self.OPENAI_MAX_RPM,
             "yandexgpt": self.YANDEX_MAX_RPM,
             "yandex_ai_search": self.YANDEX_AI_SEARCH_MAX_RPM,
+            "google_ai_overview": self.GOOGLE_AI_OVERVIEW_MAX_RPM,
             "gigachat": self.GIGACHAT_MAX_RPM,
             "gemini": self.GEMINI_MAX_RPM,
             "deepseek": self.DEEPSEEK_MAX_RPM,
