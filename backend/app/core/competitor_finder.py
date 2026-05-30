@@ -39,6 +39,8 @@ _COMPETITOR_URL_BLACKLIST = {
     "checko.ru", "rusprofile.ru", "list-org.com", "sbis.ru", "kontur.ru",
     "nalog.ru", "nalog.gov.ru", "egrul.nalog.ru", "egr.gov.by",
     "spravka.ru", "yell.ru", "zoon.ru", "zoon.by",
+    # Региональные бизнес-каталоги (типа «vitebsk.biz» — справочник, не фирма)
+    "vitebsk.biz", "minsk.biz", "by.biz", "byinform.com",
 }
 
 
@@ -487,14 +489,17 @@ async def _find_competitors_via_serp(
             rej_off_topic += 1
             continue
 
-        # 3. Имя. Реальное название с сайта (clean_org_name уже отсеяла CSS/домены)
-        # имеет приоритет. Если не нашли — берём домен как ЧЕСТНУЮ метку, не выдумываем.
-        name = org_name or (_domain_of(u) or "").lower()
+        # 3. Имя. Приоритет: реальное название с сайта; если оно generic («компании»),
+        # плейсхолдер или отсутствует — берём домен как ЧЕСТНУЮ метку. Не теряем
+        # реального конкурента, не показываем мусорное «компании» как бренд.
+        if org_name and not looks_generic_name(org_name) and not is_placeholder_name(org_name):
+            name = org_name
+        else:
+            if org_name:
+                rej_generic += 1  # имя было, но мусорное — для логов
+            name = (_domain_of(u) or "").lower()
         if not name:
             rej_no_real_site += 1
-            continue
-        if looks_generic_name(name) or is_placeholder_name(name):
-            rej_generic += 1
             continue
 
         nl = name.lower()
@@ -717,11 +722,19 @@ async def build_competitor_list(
             if not _site_matches_category(text, keywords):
                 rej_off_topic += 1
                 continue
-            # 3. Имя: настоящее с сайта в приоритете; если нет — оригинальное
-            # от ИИ (оно уже прошло is_placeholder_name выше); если и его нет —
-            # домен как честная метка. Реального конкурента не теряем.
-            name = site_name or orig_name or (_domain_of(u) or "").lower()
-            if not name or looks_generic_name(name) or is_placeholder_name(name):
+            # 3. Имя: настоящее с сайта в приоритете; если оно generic/placeholder —
+            # пробуем имя от ИИ; если и оно мусор — домен как честная метка.
+            # Реального конкурента не теряем, но «компании» как имя не показываем.
+            def _valid(n: str) -> bool:
+                return bool(n) and not looks_generic_name(n) and not is_placeholder_name(n)
+
+            if _valid(site_name):
+                name = site_name
+            elif _valid(orig_name):
+                name = orig_name
+            else:
+                name = (_domain_of(u) or "").lower()
+            if not name:
                 rej_generic += 1
                 continue
             ai_verified.append(name)
