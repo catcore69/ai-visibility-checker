@@ -23,10 +23,24 @@ from app.core.scorer import (
 
 
 # Отображаемые имена и CSS-классы моделей — синхронизированы с PDF-шаблонами.
+# Порядок карточек в отчёте — единое место. Источники, которые есть в данных,
+# но не в этом списке, идут в конце в алфавитном порядке.
+MODEL_DISPLAY_ORDER = [
+    "yandexgpt",
+    "gigachat",
+    "yandex_ai_search",
+    "google_ai_overview",
+    "chatgpt",
+    "gemini",
+    "deepseek",
+    "perplexity",
+]
+
 MODEL_META: dict[str, dict[str, str]] = {
     "chatgpt":    {"display": "ChatGPT",     "short": "GPT",  "css": "model-chatgpt"},
     "openai":     {"display": "ChatGPT",     "short": "GPT",  "css": "model-chatgpt"},
     "yandexgpt":  {"display": "YandexGPT",   "short": "Я.GPT", "css": "model-yandex"},
+    "google_ai_overview": {"display": "Google AI Overview", "short": "G.AI", "css": "model-google-ai"},
     # Этап 2.4 ТЗ: честное имя источника — XMLRiver SERP с AI-блоком,
     # не голосовой ассистент Алиса (прямого API у неё нет).
     "yandex_ai_search": {"display": "Яндекс-поиск с AI-блоком", "short": "Я.AI", "css": "model-yandex-ai"},
@@ -34,7 +48,7 @@ MODEL_META: dict[str, dict[str, str]] = {
     # Миграция 003 переименовывает ключ в существующих JSONB, но если где-то
     # остался — отрисуется под новым именем.
     "alisa":      {"display": "Яндекс-поиск с AI-блоком", "short": "Я.AI", "css": "model-yandex-ai"},
-    "gigachat":   {"display": "GigaChat",    "short": "Giga", "css": "model-gigachat"},
+    "gigachat":   {"display": "GigaChat (Сбер)", "short": "Giga", "css": "model-gigachat"},
     "gemini":     {"display": "Gemini",      "short": "Gemini", "css": "model-gemini"},
     "deepseek":   {"display": "DeepSeek",    "short": "DS",   "css": "model-deepseek"},
     "perplexity": {"display": "Perplexity",  "short": "PPLX", "css": "model-perplexity"},
@@ -296,6 +310,11 @@ def build_report_full_payload(report, analysis: Analysis) -> dict[str, Any]:
             "neutral_count":      neutral,
             "negative_count":     negative,
         })
+
+    # Сортируем по фиксированному порядку отображения (YandexGPT → GigaChat →
+    # Яндекс-AI-блок → Google AI Overview → ChatGPT → Gemini → DeepSeek → ...).
+    _order_index = {m: i for i, m in enumerate(MODEL_DISPLAY_ORDER)}
+    model_breakdown.sort(key=lambda item: (_order_index.get(item["model_name"], 999), item["model_name"]))
 
     # SoV-ранг клиента
     sov_rank = None
