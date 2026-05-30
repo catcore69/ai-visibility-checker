@@ -676,118 +676,146 @@ async def build_competitor_list(
     niche: dict[str, Any],
     brand_name: str,
     client_competitors: Optional[list[str]],
-    raw_responses: dict,
     count: int = 5,
 ) -> tuple[list[str], str, dict[str, str]]:
-    """Итерация-3, Задача 1.4: список конкурентов ТОЛЬКО из реальных данных.
+    """Блок А отчёта — ПРЯМЫЕ конкуренты: клиент (форма) + реальная выдача SERP.
 
-    Приоритет: 1) ссылки клиента → 2) реально упомянутые в ответах ИИ (с
-    проверкой реальным сайтом) → 3) реальная поисковая выдача. Никакого LLM
-    «из головы». Если реальных <3 → source="sparse" (ниша свободна).
+    Эта функция БОЛЬШЕ НЕ зависит от raw_responses (по ТЗ catcore-zametka-
+    poryadok-pipeline.md, Часть 1): её можно запускать ПАРАЛЛЕЛЬНО опросу
+    моделей через asyncio.gather. Извлечение брендов из ответов ИИ переехало
+    в отдельную функцию extract_ai_mentioned_in_niche() — это Блок Б.
 
-    Возвращает (names, overall_source, per_name_source_map). Per-name source:
-    "client" / "ai_mentioned" / "serp_direct" — используется для разделения
-    конкурентов в PDF на «Кого ИИ называет» vs «Ваши прямые конкуренты».
+    Возвращает (names, overall_source, per_name_source_map).
+    Per-name source: "client" / "serp_direct" (ai_mentioned теперь Блок Б).
     """
-    region = niche.get("region", "")
     client_list = _normalize_client_competitors(client_competitors, brand_name)[:count]
     if len(client_list) >= count:
         logger.info("competitors_from_client_only", count=len(client_list), brand=brand_name)
         return client_list[:count], "client", {n: "client" for n in client_list[:count]}
 
-    # Источник А — реально упомянутые ИИ бренды, верифицированные живым сайтом
-    # ПЛЮС жёсткие проверки: настоящее имя с сайта, не плейсхолдер, регион клиента,
-    # категория клиента. Все условия конъюнктивно (Итер-3, Задача 4).
-    from app.core.site_analyzer import (
-        fetch_site_summary,
-        looks_generic_name,
-        is_placeholder_name,
-        country_from_site,
-    )
-    ai_names = await extract_brands_from_ai_responses(raw_responses, brand_name, niche)
-    ai_verified: list[str] = []
-    if ai_names:
-        # Сразу выкидываем плейсхолдеры до похода в SERP (не жжём запросы).
-        ai_names = [n for n in ai_names if not is_placeholder_name(n)]
-        urls = await asyncio.gather(
-            *[find_competitor_url(n, region) for n in ai_names], return_exceptions=True
-        )
-        keywords = _category_keywords(niche)
-        client_country = _client_country(region)
-        valid_pairs = [(n, u) for n, u in zip(ai_names, urls) if isinstance(u, str) and u]
-        summaries = await asyncio.gather(
-            *[fetch_site_summary(u) for _, u in valid_pairs], return_exceptions=True
-        )
-        rej_wrong_country = rej_off_topic = rej_generic = 0
-        for (orig_name, u), summ in zip(valid_pairs, summaries):
-            if not isinstance(summ, dict):
-                continue
-            text = summ.get("text") or ""
-            site_name = (summ.get("org_name") or "").strip()
-
-            # Сначала проверяем сайт (регион + категория), потом решаем по имени.
-            # 1. Страна сайта = клиенту.
-            if client_country:
-                site_country = country_from_site(u, text)
-                if site_country and site_country != client_country:
-                    rej_wrong_country += 1
-                    continue
-            # 2. Категория совпадает.
-            if not _site_matches_category(text, keywords):
-                rej_off_topic += 1
-                continue
-            # 3. Имя: настоящее с сайта в приоритете; если оно generic/placeholder —
-            # пробуем имя от ИИ; если и оно мусор — домен как честная метка.
-            # Реального конкурента не теряем, но «компании» как имя не показываем.
-            def _valid(n: str) -> bool:
-                return bool(n) and not looks_generic_name(n) and not is_placeholder_name(n)
-
-            if _valid(site_name):
-                name = site_name
-            elif _valid(orig_name):
-                name = orig_name
-            else:
-                name = (_domain_of(u) or "").lower()
-            if not name:
-                rej_generic += 1
-                continue
-            ai_verified.append(name)
-        logger.info(
-            "competitors_from_ai_verified",
-            candidates=len(ai_names),
-            with_url=len(valid_pairs),
-            verified=len(ai_verified),
-            rej_generic=rej_generic,
-            rej_wrong_country=rej_wrong_country,
-            rej_off_topic=rej_off_topic,
-        )
-
-    # Источник Б — реальная поисковая выдача (без уже учтённых).
-    exclude = [brand_name] + client_list + ai_verified
+    # Реальная поисковая выдача (без уже учтённых клиентских).
+    exclude = [brand_name] + client_list
     serp = await _find_competitors_via_serp(niche, exclude=exclude, count=count)
 
-    # Слияние с приоритетом: клиент → ИИ-верифицированные → выдача.
-    merged = _merge_dedupe(client_list, ai_verified, count)
-    merged = _merge_dedupe(merged, serp, count)
+    # Слияние с приоритетом клиент → выдача.
+    merged = _merge_dedupe(client_list, serp, count)
 
-    # Карта «имя → откуда взяли»: приоритет client > ai > serp.
     sources_map: dict[str, str] = {}
     for n in client_list:
         sources_map.setdefault(n.lower(), "client")
-    for n in ai_verified:
-        sources_map.setdefault(n.lower(), "ai_mentioned")
     for n in serp:
         sources_map.setdefault(n.lower(), "serp_direct")
-    # Преобразуем в map по исходным именам.
     per_name = {n: sources_map.get(n.lower(), "serp_direct") for n in merged[:count]}
 
     if len(merged) >= 3:
-        source = "client" if (client_list and not ai_verified and not serp) else "verified"
+        source = "client" if (client_list and not serp) else "verified"
         return merged[:count], source, per_name
 
     # Реальных конкурентов <3 → честный сигнал «ниша свободна».
     logger.info("competitors_sparse", count=len(merged), brand=brand_name)
     return merged[:count], "sparse", per_name
+
+
+async def extract_ai_mentioned_in_niche(
+    raw_responses: dict,
+    niche: dict[str, Any],
+    brand_name: str,
+    existing_block_a: list[str],
+    count: int = 5,
+) -> list[str]:
+    """Блок Б отчёта: кого ИИ реально называет В ВАШЕЙ НИШЕ.
+
+    По MD2.2: извлекаем бренды из готовых ответов ИИ (это разрешённое
+    использование LLM — извлечение сущностей из текста, НЕ генерация фактов).
+    Для каждого кандидата:
+    - находим сайт через SERP (find_competitor_url);
+    - проверяем что сайт ДЕЙСТВИТЕЛЬНО про эту же нишу
+      (_site_matches_category, стемы из category + subcategory);
+    - отбрасываем имена, уже в Блоке А (избегаем дубля);
+    - отбрасываем плейсхолдеры и родовые названия.
+
+    Регион сайта НЕ проверяем строго: это ровно тот случай, когда ИИ называет
+    федеральных игроков (Контур, 1С) — они не в регионе клиента, но это
+    «кого ИИ из вашей ниши уже знает». MD2.2 говорит об этом явно.
+
+    Возвращает список имён (до count). Используется report-builder'ом для
+    Блока Б, который показывается только если в Блоке А у всех score~0.
+    """
+    from app.core.site_analyzer import (
+        fetch_site_summary,
+        looks_generic_name,
+        is_placeholder_name,
+    )
+
+    region = niche.get("region", "")
+    ai_names = await extract_brands_from_ai_responses(raw_responses, brand_name, niche)
+    if not ai_names:
+        logger.info("ai_mentioned_in_niche_empty", brand=brand_name)
+        return []
+
+    # Плейсхолдеры и совпадения с Блоком А — выкидываем до похода в SERP.
+    block_a_lc = {n.lower() for n in (existing_block_a or [])}
+    brand_lc = (brand_name or "").lower()
+    ai_names = [
+        n for n in ai_names
+        if not is_placeholder_name(n) and n.lower() not in block_a_lc and n.lower() != brand_lc
+    ]
+    if not ai_names:
+        return []
+
+    urls = await asyncio.gather(
+        *[find_competitor_url(n, region) for n in ai_names], return_exceptions=True
+    )
+    keywords = _category_keywords(niche)
+    valid_pairs = [(n, u) for n, u in zip(ai_names, urls) if isinstance(u, str) and u]
+    summaries = await asyncio.gather(
+        *[fetch_site_summary(u) for _, u in valid_pairs], return_exceptions=True
+    )
+
+    out: list[str] = []
+    seen: set[str] = set()
+    rej_off_topic = rej_generic = 0
+    for (orig_name, u), summ in zip(valid_pairs, summaries):
+        if not isinstance(summ, dict):
+            continue
+        text = summ.get("text") or ""
+        site_name = (summ.get("org_name") or "").strip()
+
+        # Категория должна совпадать (без region-check — Блок Б принимает
+        # федеральные игроки, региональные ИИ всё равно их называет).
+        if not _site_matches_category(text, keywords):
+            rej_off_topic += 1
+            continue
+
+        # Имя: site_name → orig_name → домен.
+        def _ok(n: str) -> bool:
+            return bool(n) and not looks_generic_name(n) and not is_placeholder_name(n)
+        if _ok(site_name):
+            name = site_name
+        elif _ok(orig_name):
+            name = orig_name
+        else:
+            name = (_domain_of(u) or "").lower()
+        if not name:
+            rej_generic += 1
+            continue
+        nl = name.lower()
+        if nl in seen or nl in block_a_lc or nl == brand_lc:
+            continue
+        seen.add(nl)
+        out.append(name)
+        if len(out) >= count:
+            break
+
+    logger.info(
+        "ai_mentioned_in_niche",
+        candidates=len(ai_names),
+        with_url=len(valid_pairs),
+        accepted=len(out),
+        rej_off_topic=rej_off_topic,
+        rej_generic=rej_generic,
+    )
+    return out
 
 
 async def find_competitors(

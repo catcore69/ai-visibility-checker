@@ -250,11 +250,12 @@ def build_report_full_payload(report, analysis: Analysis) -> dict[str, Any]:
     """
     brand_name  = report.brand_name
     competitors = list(report.competitors or [])
-    all_brands  = [brand_name] + competitors
+    # Блок Б: кого ИИ называет в нише — сохранён в niche_data.
+    nd = report.niche_data if isinstance(report.niche_data, dict) else {}
+    ai_mentioned_in_niche: list[str] = list(nd.get("ai_mentioned_in_niche") or [])
+    all_brands = [brand_name] + competitors + ai_mentioned_in_niche
 
-    # Сравнение конкурентов с правильными полями для фронта
-    comparison_rank: list[dict] = []
-    for b in all_brands:
+    def _brand_row(b: str) -> dict:
         score = calculate_visibility_score(analysis, b)
         presence = calculate_presence_rate(analysis, b)
         sov = calculate_share_of_voice(analysis, b)
@@ -262,7 +263,7 @@ def build_report_full_payload(report, analysis: Analysis) -> dict[str, Any]:
         models_found = len({r.model_name for r in b_results})
         sents = [r.sentiment for r in b_results]
         dom_sent = max(set(sents), key=sents.count) if sents else "neutral"
-        comparison_rank.append({
+        return {
             "name": b,
             "is_client": b == brand_name,
             "score": score,
@@ -270,8 +271,40 @@ def build_report_full_payload(report, analysis: Analysis) -> dict[str, Any]:
             "sov": sov,
             "models_found": models_found,
             "dominant_sentiment": dom_sent,
-        })
+        }
+
+    # Полный список ВСЕХ брендов (Блок А + Блок Б + клиент) — нужен для total SoV.
+    comparison_rank: list[dict] = [_brand_row(b) for b in all_brands]
     comparison_rank.sort(key=lambda x: -x["score"])
+
+    # Блок А отдельной таблицей: клиент + прямые из выдачи.
+    block_a_rows = [_brand_row(b) for b in ([brand_name] + competitors)]
+    block_a_rows.sort(key=lambda x: (not x["is_client"], -x["score"]))
+
+    # Блок Б: клиент (для сравнения) + кого ИИ называет в нише.
+    block_b_rows = (
+        [_brand_row(b) for b in ([brand_name] + ai_mentioned_in_niche)]
+        if ai_mentioned_in_niche else []
+    )
+    block_b_rows.sort(key=lambda x: (not x["is_client"], -x["score"]))
+
+    # MD2.2 — порог для показа Блока Б: показываем, если у всех в Блоке А
+    # (исключая клиента) max Score < 20. Иначе Блок Б не нужен — главный
+    # аргумент уже есть в Блоке А.
+    non_client_a = [r for r in block_a_rows if not r["is_client"]]
+    max_direct_score = max((r["score"] for r in non_client_a), default=0)
+    show_block_b = bool(block_b_rows) and max_direct_score < 20
+
+    # Три сценария для текстового вывода (MD2.2):
+    #   scenario_3 — прямой конкурент в ИИ (есть упоминания в А);
+    #   scenario_2 — прямых не знает, но ИИ знает других в нише;
+    #   scenario_1 — рынок полностью пустой.
+    if max_direct_score >= 20:
+        narrative_scenario = "scenario_3"
+    elif show_block_b:
+        narrative_scenario = "scenario_2"
+    else:
+        narrative_scenario = "scenario_1"
 
     # Список реально опрошенных моделей
     model_names_used = sorted({r.model_name for r in analysis.all_results})
@@ -386,6 +419,13 @@ def build_report_full_payload(report, analysis: Analysis) -> dict[str, Any]:
         "top_weakness":      _top_weakness(comparison_rank, brand_name, weak_display),
 
         "competitor_comparison": comparison_rank,
+        # MD2.2: Блок А (прямые из выдачи) и Блок Б (кого ИИ называет в нише).
+        "block_a_rows":          block_a_rows,
+        "block_b_rows":          block_b_rows,
+        "show_block_b":          show_block_b,
+        "max_direct_score":      max_direct_score,
+        "narrative_scenario":    narrative_scenario,
+        "ai_mentioned_in_niche": ai_mentioned_in_niche,
         "model_breakdown":       model_breakdown,
         "prompts_matrix":        prompts_matrix,
         "models_list":           models_list,

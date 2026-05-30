@@ -277,30 +277,47 @@ async def build_and_upload_pdf(report, analysis: Analysis, competitors: list[str
     brand_name = report.brand_name
     score = report.visibility_score or 0
     niche = report.niche_data or {}
-    all_brands = [brand_name] + competitors
+    # MD2: Блок А (прямые из выдачи) + Блок Б (кого ИИ называет в нише, из niche_data).
+    _niche_dict = report.niche_data if isinstance(report.niche_data, dict) else {}
+    ai_mentioned_in_niche: list[str] = list(_niche_dict.get("ai_mentioned_in_niche") or [])
+    all_brands = [brand_name] + competitors + ai_mentioned_in_niche
 
     comparison = compare_with_competitors(analysis, brand_name, all_brands)
 
-    # Итер-3 Задача 69: разделение конкурентов в PDF.
-    # Источник «откуда взяли каждого» лежит в niche_data.competitor_sources.
-    _csources = {}
-    if isinstance(report.niche_data, dict):
-        _csources = report.niche_data.get("competitor_sources") or {}
-    _csources_lc = {k.lower(): v for k, v in _csources.items()} if isinstance(_csources, dict) else {}
+    # Разделяем по принадлежности к Блоку А или Б.
+    a_names_lc = {n.lower() for n in competitors}
+    b_names_lc = {n.lower() for n in ai_mentioned_in_niche}
     for item in comparison:
+        nl = (item.get("name") or "").lower()
         if item.get("is_client"):
             item["source"] = "client_self"
+        elif nl in a_names_lc:
+            item["source"] = "serp_direct"
+        elif nl in b_names_lc:
+            item["source"] = "ai_mentioned"
         else:
-            item["source"] = _csources_lc.get((item.get("name") or "").lower(), "serp_direct")
-    ai_comparison = [c for c in comparison if c.get("source") == "ai_mentioned"]
-    direct_comparison = [c for c in comparison if c.get("source") in ("serp_direct", "client")]
-    # Клиент всегда в обеих секциях (для контекста сравнения).
+            item["source"] = "other"
+
+    direct_comparison = [c for c in comparison if c.get("source") in ("serp_direct", "client_self")]
+    ai_comparison = [c for c in comparison if c.get("source") in ("ai_mentioned", "client_self")]
+    # Клиент — всегда первой строкой в каждом блоке для контекста.
     client_row = next((c for c in comparison if c.get("is_client")), None)
     if client_row:
         if not any(c.get("is_client") for c in ai_comparison):
             ai_comparison.insert(0, client_row)
         if not any(c.get("is_client") for c in direct_comparison):
             direct_comparison.insert(0, client_row)
+
+    # MD2.2: показ Блока Б — только если у всех в А max Score < 20.
+    _non_client_a = [c for c in direct_comparison if not c.get("is_client")]
+    max_direct_score = max((c.get("score", 0) for c in _non_client_a), default=0)
+    show_block_b = bool(ai_mentioned_in_niche) and max_direct_score < 20
+    if max_direct_score >= 20:
+        narrative_scenario = "scenario_3"
+    elif show_block_b:
+        narrative_scenario = "scenario_2"
+    else:
+        narrative_scenario = "scenario_1"
     model_breakdown = get_model_breakdown(analysis, brand_name)
     top_sources = get_top_sources(analysis)
     worst_prompts = _get_worst_prompts(analysis, brand_name, competitors)
@@ -397,6 +414,11 @@ async def build_and_upload_pdf(report, analysis: Analysis, competitors: list[str
         "recommendations": report.recommendations or [],
         "expert_note": report.expert_note,
 
+        # MD2.2: адаптивный сценарий + Блок Б
+        "narrative_scenario":      narrative_scenario,  # scenario_1/2/3
+        "show_block_b":            show_block_b,
+        "max_direct_score":        max_direct_score,
+        "ai_mentioned_in_niche":   ai_mentioned_in_niche,
         # Итерация-2 А2: ветка страницы 6 («ниша свободна» / «догони лидера»)
         "niche_is_open": niche_is_open,
         "niche_has_strong_leader": niche_has_strong_leader,
