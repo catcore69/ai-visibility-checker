@@ -74,13 +74,17 @@ async def poll_all_models(
     prompts: list[str],
     pollers: list,
     niche_key: str,
+    region: str = "",
 ) -> dict[str, dict[str, object]]:
-    """Опрашивает все модели по всем промптам параллельно."""
+    """Опрашивает все модели по всем промптам параллельно.
+
+    region — регион клиента; нужен поллерам с гео-привязкой
+    (yandex_ai_search, google_ai_overview). Остальные игнорируют."""
     sem = asyncio.Semaphore(10)
 
     async def query_one(poller, prompt):
         async with sem:
-            return await poller.query(prompt, niche_key)
+            return await poller.query(prompt, niche_key, region=region)
 
     results: dict[str, dict] = {p.name: {} for p in pollers}
     tasks = [
@@ -217,7 +221,7 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
         await update_report_status(db, report_id, "polling_models", progress=35)
         pollers = _build_pollers(redis_cache, settings)
         niche_key = f"{niche.get('category', '')}:{report.region}"
-        raw_responses = await poll_all_models(prompts, pollers, niche_key)
+        raw_responses = await poll_all_models(prompts, pollers, niche_key, region=report.region)
         raw_responses_json = {
             model: {prompt: r.response_text for prompt, r in prompt_map.items()}
             for model, prompt_map in raw_responses.items()

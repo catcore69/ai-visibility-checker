@@ -8,7 +8,7 @@ class YandexGPTPoller(BasePoller):
     display_name = "YandexGPT"
     model = "yandexgpt-lite"
 
-    async def _query_raw(self, prompt: str) -> str:
+    async def _query_raw(self, prompt: str, region: str = "") -> str:
         url = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
         headers = {
             "Authorization": f"Api-Key {self.config.YANDEX_API_KEY}",

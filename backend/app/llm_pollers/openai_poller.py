@@ -12,7 +12,7 @@ class OpenAIPoller(BasePoller):
         super().__init__(cache, config)
         self.client = AsyncOpenAI(api_key=config.OPENAI_API_KEY, base_url=config.OPENAI_BASE_URL)
 
-    async def _query_raw(self, prompt: str) -> str:
+    async def _query_raw(self, prompt: str, region: str = "") -> str:
         try:
             response = await self.client.chat.completions.create(
                 model=self.model,
