@@ -77,6 +77,22 @@ def calculate_presence_rate(analysis: Analysis, brand_name: str) -> int:
     return round(mentioned_prompts / analysis.total_prompts * 100)
 
 
+# Человекочитаемые имена источников — в одном месте, чтобы PDF/web/email
+# показывали «Google AI Overview», а не «google_ai_overview».
+MODEL_DISPLAY_NAMES = {
+    "yandexgpt": "YandexGPT",
+    "gigachat": "GigaChat (Сбер)",
+    "yandex_ai_search": "Яндекс-поиск с AI-блоком",
+    "google_ai_overview": "Google AI Overview",
+    "chatgpt": "ChatGPT",
+    "gemini": "Gemini",
+    "deepseek": "DeepSeek",
+    "perplexity": "Perplexity",
+    # старое имя из БД до Этапа 2.4 — на всякий случай не теряем
+    "alisa": "Яндекс-поиск с AI-блоком",
+}
+
+
 def get_model_breakdown(analysis: Analysis, brand_name: str) -> list[dict]:
     """Разбивка по моделям: % упоминаний, средняя позиция, тональность."""
     breakdown = []
@@ -111,7 +127,7 @@ def get_model_breakdown(analysis: Analysis, brand_name: str) -> list[dict]:
                 "mentioned_count": len(mentioned),
             "mentions": len(mentioned),
             "prompts_tested": total,
-            "display_name": model_name,
+            "display_name": MODEL_DISPLAY_NAMES.get(model_name, model_name),
             "presence_rate": mention_rate,
             "positive_count": sum(1 for r in mentioned if r.sentiment == "positive"),
             }
