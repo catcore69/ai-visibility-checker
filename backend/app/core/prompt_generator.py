@@ -18,11 +18,11 @@ from typing import Any, Optional
 
 import httpx
 from openai import AsyncOpenAI
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.llm_prompts import PROMPT_GENERATOR_PROMPT, REAL_QUERIES_GROUPER_PROMPT
+from app.core.llm_prompts import PROMPT_GENERATOR_PROMPT, REAL_QUERIES_SELECTOR_PROMPT
 from app.db.models.niche_prompt_template import NichePromptTemplate
 from app.db.session import AsyncSessionLocal
 from app.utils.logger import get_logger
@@ -50,6 +50,30 @@ def _niche_key(niche: dict[str, Any]) -> str:
     return f"{category}|{subcategory}|{region}|{audience}"
 
 
+_TEMPLATE_RESIDUE_PATTERNS = (
+    "x или y",     # буквальный плейсхолдер
+    " x ", " y ",  # одиночные плейсхолдеры
+    "сравнение:",  # шаблонный префикс
+    "рекомендация:",
+    "{",  # незаполненная переменная промпта
+    "}",
+)
+
+
+def _looks_like_template_residue(prompts: list[str]) -> bool:
+    """True, если в списке промптов есть следы LLM-шаблонов («X или Y:», и др.)
+    или незаполненные плейсхолдеры. Используется как инвалидатор кеша:
+    после улучшения промптов мы не хотим показывать старые шаблонные запросы."""
+    for p in prompts or []:
+        if not isinstance(p, str):
+            continue
+        pl = p.lower()
+        for marker in _TEMPLATE_RESIDUE_PATTERNS:
+            if marker in pl:
+                return True
+    return False
+
+
 async def _load_cached_prompts(niche_key: str) -> Optional[list[str]]:
     """Читает промпты из niche_prompt_templates по ключу."""
     try:
@@ -64,6 +88,18 @@ async def _load_cached_prompts(niche_key: str) -> Optional[list[str]]:
     except Exception as exc:
         logger.warning("prompt_cache_load_error", error=str(exc), niche_key=niche_key)
     return None
+
+
+async def _delete_cached_prompts(niche_key: str) -> None:
+    """Удаляет стейл-запись кеша (для инвалидации шаблонного мусора)."""
+    try:
+        async with AsyncSessionLocal() as db:
+            await db.execute(
+                delete(NichePromptTemplate).where(NichePromptTemplate.niche_key == niche_key)
+            )
+            await db.commit()
+    except Exception as exc:
+        logger.warning("prompt_cache_delete_error", niche_key=niche_key, error=str(exc))
 
 
 async def _save_cached_prompts(
@@ -88,6 +124,71 @@ async def _save_cached_prompts(
     except Exception as exc:
         # Возможно конкурентный insert — не критично, просто читаем в след. раз.
         logger.warning("prompt_cache_save_error", error=str(exc), niche_key=niche_key)
+
+
+async def _google_suggest(query: str, hl: str = "ru") -> list[str]:
+    """Бесплатные автоподсказки Google (открытый эндпоинт, без авторизации).
+    Возвращает строки, которые предлагает Google при наборе запроса.
+    """
+    if not query or not query.strip():
+        return []
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as c:
+            r = await c.get(
+                "https://suggestqueries.google.com/complete/search",
+                params={"client": "firefox", "q": query, "hl": hl},
+            )
+            r.raise_for_status()
+        data = r.json()
+        if isinstance(data, list) and len(data) >= 2 and isinstance(data[1], list):
+            return [s for s in data[1] if isinstance(s, str)][:20]
+    except Exception as exc:
+        logger.warning("google_suggest_error", query=query[:60], error=str(exc))
+    return []
+
+
+def _city_from_region(region: str) -> str:
+    """«Минск, Беларусь» → «Минск»; «Витебск, Беларусь» → «Витебск»."""
+    if not region:
+        return ""
+    first = region.split(",")[0].strip()
+    # Если это название страны — города нет.
+    if first.lower() in ("россия", "беларусь", "рф", "рб", "украина", "казахстан"):
+        return ""
+    return first
+
+
+def _build_query_seeds(niche: dict[str, Any]) -> list[str]:
+    """Сиды для автоподсказок. Нейтральные («{категория} {город}»), без
+    наших шаблонов «лучший»/«посоветуй» — иначе suggest вернёт продолжение
+    нашего шаблона, а не то, что люди реально ищут."""
+    cat = (niche.get("category") or "").strip()
+    sub = (niche.get("subcategory") or "").strip()
+    region = (niche.get("region") or "").strip()
+    city = (niche.get("city") or "").strip() or _city_from_region(region)
+    country_part = region.split(",")[-1].strip() if "," in region else ""
+
+    seeds: list[str] = []
+    if cat:
+        if city:
+            seeds.append(f"{cat} {city}")
+        if country_part and country_part.lower() not in ("", "рф", "рб"):
+            seeds.append(f"{cat} {country_part}")
+        seeds.append(cat)
+    if sub and sub.lower() != cat.lower():
+        if city:
+            seeds.append(f"{sub} {city}")
+        seeds.append(sub)
+
+    # Дедуп с сохранением порядка
+    seen: set[str] = set()
+    out: list[str] = []
+    for s in seeds:
+        sl = s.strip().lower()
+        if sl and sl not in seen:
+            seen.add(sl)
+            out.append(s)
+    return out
 
 
 async def _xmlriver_suggest(query: str) -> list[str]:
@@ -155,37 +256,45 @@ async def _xmlriver_wordstat(query: str) -> list[str]:
 
 
 async def _fetch_real_queries(niche: dict[str, Any]) -> list[str]:
-    """Итерация-3, Задача 2: реальные поисковые запросы вместо LLM-шаблонов.
+    """Итерация-3, Задача 2 (ТЗ-1.1): реальные поисковые запросы людей.
 
-    Источники: автоподсказки поиска (XMLRiver suggest) + Яндекс.Wordstat.
-    Дедуп, чистка, ограничение длины. Дальше LLM только сгруппирует и отберёт 10.
+    Источники (по убыванию приоритета): Google suggest (открытый эндпоинт),
+    Яндекс suggest через XMLRiver, Яндекс Wordstat через XMLRiver (для РФ).
+    Каждый источник опрашиваем по НЕСКОЛЬКИМ сидам (категория+город, категория
+    +страна, голая категория). LLM здесь не участвует.
     """
-    category = niche.get("category", "").strip()
-    if not category:
+    seeds = _build_query_seeds(niche)
+    if not seeds:
         return []
-    # Точка отсчёта — категория + город (если есть).
-    city = (niche.get("region", "") or "").split(",")[0].strip()
-    base = f"{category} {city}".strip() if city and "беларус" not in city.lower() and "росси" not in city.lower() else category
 
-    sug_task = _xmlriver_suggest(base)
-    ws_task = _xmlriver_wordstat(base)
-    # Доп.вариант — без города, общее по нише (если регион нишевый).
-    sug2_task = _xmlriver_suggest(category) if city else asyncio.sleep(0, result=[])
-    sug, ws, sug2 = await asyncio.gather(sug_task, ws_task, sug2_task, return_exceptions=True)
+    # До 6 сидов — иначе много запросов в suggest-эндпоинты.
+    seeds = seeds[:6]
+    region_l = (niche.get("region") or "").lower()
+    is_rf = "росси" in region_l or "рф" in region_l
 
+    tasks: list = []
+    for seed in seeds:
+        tasks.append(_google_suggest(seed))    # Google suggest
+        tasks.append(_xmlriver_suggest(seed))  # Yandex suggest через XMLRiver
+    # Wordstat доступен только для РФ-регионов (по конфигу XMLRiver).
+    if is_rf:
+        for seed in seeds[:3]:
+            tasks.append(_xmlriver_wordstat(seed))
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
     raw: list[str] = []
-    for src in (sug, ws, sug2):
+    for src in results:
         if isinstance(src, list):
             raw.extend(src)
 
-    # Чистка + дедуп с сохранением порядка.
+    # Чистка + дедуп с сохранением порядка. НЕ выкидываем сам сид — он часто
+    # тоже валидный запрос («бухгалтерские услуги витебск»).
     seen: set[str] = set()
     out: list[str] = []
     for q in raw:
         q_clean = re.sub(r"\s+", " ", q).strip(" .,;:!?")
-        if not q_clean or len(q_clean) < 8 or len(q_clean) > 150:
+        if not q_clean or len(q_clean) < 5 or len(q_clean) > 200:
             continue
-        # Чисто статусные/слишком общие запросы убираем.
         if q_clean.lower() in ("найти", "купить", "цена"):
             continue
         nl = q_clean.lower()
@@ -193,40 +302,88 @@ async def _fetch_real_queries(niche: dict[str, Any]) -> list[str]:
             continue
         seen.add(nl)
         out.append(q_clean)
-    logger.info("real_queries_fetched", base=base, raw=len(raw), unique=len(out))
+
+    logger.info(
+        "real_queries_fetched",
+        seeds=len(seeds),
+        google_yandex_calls=len(seeds) * 2,
+        wordstat_calls=(len(seeds[:3]) if is_rf else 0),
+        raw=len(raw),
+        unique=len(out),
+    )
     return out
 
 
-async def _group_real_queries_via_llm(
+async def _select_real_queries(
     niche: dict[str, Any], real_queries: list[str], count: int, brand_name: str = ""
 ) -> list[str]:
-    """LLM только группирует/отбирает из РЕАЛЬНЫХ запросов — не выдумывает новые."""
+    """ТЗ-2: LLM ОТБИРАЕТ из реальных, ничего не сочиняя. После ответа
+    валидируем: каждый запрос должен быть ДОСЛОВНО в `real_queries`.
+    Запросы, которых там нет → LLM их переформулировала → отбрасываем."""
     if not real_queries:
         return []
+    # Если реальных и так мало — отдаём как есть, LLM не нужна.
+    if len(real_queries) <= count:
+        return real_queries
+
     client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, base_url=settings.OPENAI_BASE_URL)
-    lines = "\n".join(f"- {q}" for q in real_queries[:60])  # ограничиваем длину промпта
-    prompt = REAL_QUERIES_GROUPER_PROMPT.format(
+    lines = "\n".join(f"- {q}" for q in real_queries[:80])
+    prompt = REAL_QUERIES_SELECTOR_PROMPT.format(
         category=niche.get("category", ""),
         region=niche.get("region", ""),
         target_audience_description=niche.get("target_audience_description", ""),
         brand_name=brand_name or niche.get("brand", ""),
+        count=count,
         real_queries=lines,
     )
     try:
         resp = await client.chat.completions.create(
             model=settings.MODEL_TEXT,
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,
+            temperature=0,  # детерминированно — мы только отбираем
             max_tokens=800,
         )
         raw = (resp.choices[0].message.content or "[]").strip()
         raw = raw.strip("```json").strip("```").strip()
-        items = json.loads(raw)
-        if isinstance(items, list):
-            return [p.strip() for p in items if isinstance(p, str) and p.strip()][:count]
+        items = json.loads(raw) if raw else []
+        if not isinstance(items, list):
+            items = []
     except Exception as exc:
-        logger.warning("real_queries_group_error", error=str(exc))
-    return []
+        logger.warning("real_queries_select_error", error=str(exc))
+        items = []
+
+    # ВАЛИДАЦИЯ ДОСЛОВНОСТИ: запрос должен быть в исходном списке (lowercase + норма пробелов).
+    norm = lambda s: re.sub(r"\s+", " ", (s or "").strip()).lower()
+    real_index = {norm(q): q for q in real_queries}
+    validated: list[str] = []
+    rejected = 0
+    for q in items:
+        if not isinstance(q, str):
+            continue
+        key = norm(q)
+        if key in real_index:
+            validated.append(real_index[key])
+        else:
+            rejected += 1
+    logger.info(
+        "real_queries_selected",
+        returned_by_llm=len(items),
+        validated=len(validated),
+        rejected_as_invented=rejected,
+    )
+    # Если LLM «креативила» и валидных < половины count — берём первые N из реальных
+    # напрямую (порядок суггеста — это уже частотность поиска).
+    if len(validated) < max(3, count // 2):
+        logger.warning("llm_selector_unreliable_fallback_to_head", count=count)
+        # Дополним из real_queries уникальными головными, сохранив имеющиеся валидированные.
+        seen = {norm(q) for q in validated}
+        for q in real_queries:
+            if norm(q) not in seen:
+                validated.append(q)
+                seen.add(norm(q))
+            if len(validated) >= count:
+                break
+    return validated[:count]
 
 
 async def _generate_via_llm(niche: dict[str, Any], count: int) -> list[str]:
@@ -277,26 +434,37 @@ async def generate_prompts(niche: dict[str, Any], count: int = 10) -> list[str]:
     niche_key = _niche_key(niche)
 
     cached = await _load_cached_prompts(niche_key)
-    if cached and len(cached) >= max(count - 2, 5):
+    if cached and len(cached) >= max(count - 2, 5) and not _looks_like_template_residue(cached):
         logger.info("prompts_from_cache", niche_key=niche_key, count=len(cached))
         return cached[:count]
+    if cached and _looks_like_template_residue(cached):
+        logger.warning("cache_invalidated_template_artifacts", niche_key=niche_key, count=len(cached))
+        # Удаляем стейл-запись, чтобы _save_cached_prompts смог записать свежие.
+        await _delete_cached_prompts(niche_key)
 
-    # Итерация-3, Задача 2: сначала пробуем РЕАЛЬНЫЕ запросы (suggest + wordstat),
-    # LLM только группирует и отбирает 10. Если реальных недостаточно —
-    # graceful fallback на LLM-генерацию по шаблонам.
+    # Итерация-3, Задача 2 (ТЗ): запросы — ИЗ РЕАЛЬНЫХ подсказок.
+    # LLM здесь только ОТБИРАЕТ ДОСЛОВНО из списка (с валидацией). Никаких
+    # добивок шаблонной генерацией до полного count. Лучше 5 реальных, чем
+    # 5 реальных + 5 выдуманных. На LLM-fallback идём только если реальных <3
+    # (совсем нишевый регион / suggest-эндпоинты молчат).
     prompts: list[str] = []
     try:
         real = await _fetch_real_queries(niche)
-        if len(real) >= 10:
-            grouped = await _group_real_queries_via_llm(niche, real, count)
-            if len(grouped) >= max(count - 2, 5):
-                prompts = grouped
-                logger.info("prompts_from_real_queries", niche_key=niche_key, count=len(prompts))
+        if len(real) >= 3:
+            prompts = await _select_real_queries(niche, real, count)
+            logger.info(
+                "prompts_from_real_queries",
+                niche_key=niche_key,
+                real_pool=len(real),
+                returned=len(prompts),
+            )
     except Exception as exc:
         logger.warning("real_queries_pipeline_failed", error=str(exc))
 
     if not prompts:
+        # Совсем не нашли реальных подсказок — крайний случай.
         prompts = await _generate_via_llm(niche, count)
+        logger.warning("prompts_template_fallback_used", niche_key=niche_key, count=len(prompts))
 
     if prompts and len(prompts) >= 5:
         # Сохраняем только если получили достаточное число — мусор не кешируем.
