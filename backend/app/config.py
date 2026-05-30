@@ -52,7 +52,11 @@ class Settings(BaseSettings):
 
     # === Pipeline ===
     # Этап 2.4 ТЗ: "alisa" заменён на "yandex_ai_search" (честное имя XMLRiver SERP).
-    ENABLED_MODELS: str = "chatgpt,yandexgpt,yandex_ai_search,gigachat,gemini,deepseek,perplexity"
+    # Порядок отображения в отчёте/на лендинге (заявленное должно равняться фактическому):
+    # YandexGPT → GigaChat → Яндекс-поиск с AI-блоком → Google AI Overview (Phase 2) →
+    # ChatGPT → Gemini → DeepSeek. Perplexity временно отключена по стоимости
+    # (код остаётся, для возврата достаточно добавить «perplexity» в .env).
+    ENABLED_MODELS: str = "yandexgpt,yandex_ai_search,gigachat,chatgpt,gemini,deepseek"
     # Этап 1.3 ТЗ: снижено с 15 до 10 (4 рек / 3 срав / 2 проб / 1 транз)
     PROMPTS_PER_REPORT: int = 10
     COMPETITORS_PER_REPORT: int = 5
