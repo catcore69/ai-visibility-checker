@@ -159,26 +159,33 @@ def _city_from_region(region: str) -> str:
 
 
 def _build_query_seeds(niche: dict[str, Any]) -> list[str]:
-    """Сиды для автоподсказок. Нейтральные («{категория} {город}»), без
-    наших шаблонов «лучший»/«посоветуй» — иначе suggest вернёт продолжение
-    нашего шаблона, а не то, что люди реально ищут."""
+    """Сиды для автоподсказок. Приоритет: subcategory (узкая ниша) → category
+    (общая). Раньше брали только category, и магазин аккумуляторов
+    (subcategory=«Аккумуляторы для транспорта», category=«Автоаксессуары»)
+    получал подсказки про автоаксессуары (мимо темы). Subcategory всегда
+    конкретнее — у живых suggest-движков она даёт релевантные подсказки.
+    """
     cat = (niche.get("category") or "").strip()
     sub = (niche.get("subcategory") or "").strip()
     region = (niche.get("region") or "").strip()
     city = (niche.get("city") or "").strip() or _city_from_region(region)
     country_part = region.split(",")[-1].strip() if "," in region else ""
 
+    # Базовая узкая ниша = subcategory если есть, иначе category.
+    primary = sub or cat
+    secondary = cat if sub else ""  # category как widening, только если subcategory была.
+
     seeds: list[str] = []
-    if cat:
+    if primary:
         if city:
-            seeds.append(f"{cat} {city}")
+            seeds.append(f"{primary} {city}")
         if country_part and country_part.lower() not in ("", "рф", "рб"):
-            seeds.append(f"{cat} {country_part}")
-        seeds.append(cat)
-    if sub and sub.lower() != cat.lower():
+            seeds.append(f"{primary} {country_part}")
+        seeds.append(primary)
+    # category для расширения, если есть отличие
+    if secondary and secondary.lower() != primary.lower():
         if city:
-            seeds.append(f"{sub} {city}")
-        seeds.append(sub)
+            seeds.append(f"{secondary} {city}")
 
     # Дедуп с сохранением порядка
     seen: set[str] = set()
