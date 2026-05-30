@@ -387,6 +387,7 @@ async def _select_real_queries(
     lines = "\n".join(f"- {q}" for q in real_queries[:80])
     prompt = REAL_QUERIES_SELECTOR_PROMPT.format(
         category=niche.get("category", ""),
+        subcategory=niche.get("subcategory", ""),
         region=niche.get("region", ""),
         target_audience_description=niche.get("target_audience_description", ""),
         brand_name=brand_name or niche.get("brand", ""),
@@ -428,18 +429,10 @@ async def _select_real_queries(
         validated=len(validated),
         rejected_as_invented=rejected,
     )
-    # Если LLM «креативила» и валидных < половины count — берём первые N из реальных
-    # напрямую (порядок суггеста — это уже частотность поиска).
-    if len(validated) < max(3, count // 2):
-        logger.warning("llm_selector_unreliable_fallback_to_head", count=count)
-        # Дополним из real_queries уникальными головными, сохранив имеющиеся валидированные.
-        seen = {norm(q) for q in validated}
-        for q in real_queries:
-            if norm(q) not in seen:
-                validated.append(q)
-                seen.add(norm(q))
-            if len(validated) >= count:
-                break
+    # Раньше тут был fallback «если validated мало — добиваем головой real_queries».
+    # Это давало мусор в отчёт (нерелевантные «аксессуары террария»). По ТЗ
+    # «лучше 5 реальных и релевантных, чем 5 реальных + 5 мусора» — возвращаем
+    # сколько отобрала LLM. Если 3 — значит 3 (это честнее, чем 10 с мусором).
     return validated[:count]
 
 
