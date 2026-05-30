@@ -215,58 +215,83 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
             competitors = None
             competitors_source = None
 
-        # ===== ШАГ 4: Промпты (Фаза 2: опрос ИДЁТ ДО подбора конкурентов) =====
+        # ===== ШАГ 4: Промпты =====
         await update_report_status(db, report_id, "prompt_generation", progress=25)
         prompts = await generate_prompts(niche, count=settings.PROMPTS_PER_REPORT)
         await update_report_field(db, report_id, prompts=prompts)
 
-        # ===== ШАГ 5: Опрос моделей реальными запросами =====
+        # ===== ШАГ 5: ПАРАЛЛЕЛЬНО — Блок А (SERP-конкуренты) И опрос моделей =====
+        # По MD2 Часть 1: конкуренты из выдачи не зависят от ответов ИИ, гоним
+        # одновременно с опросом. Это экономит ~минуту (опрос ≈45с/вызов × 7 моделей).
         await update_report_status(db, report_id, "polling_models", progress=35)
         pollers = _build_pollers(redis_cache, settings)
         niche_key = f"{niche.get('category', '')}:{report.region}"
-        raw_responses = await poll_all_models(prompts, pollers, niche_key, region=report.region)
+
+        client_competitors = (
+            list(report.client_competitors)
+            if isinstance(report.client_competitors, list)
+            else None
+        )
+
+        # Если нишу/конкурентов взяли из прошлого отчёта (Б1-reuse) — не пересчитываем.
+        if not (reused and competitors):
+            poll_task = poll_all_models(prompts, pollers, niche_key, region=report.region)
+            block_a_task = build_competitor_list(
+                niche,
+                brand_name=report.brand_name,
+                client_competitors=client_competitors,
+                count=settings.COMPETITORS_PER_REPORT,
+            )
+            raw_responses, block_a_result = await asyncio.gather(poll_task, block_a_task)
+            competitors, competitors_source, competitor_sources_map = block_a_result
+            logger.info("block_a_built", competitors=competitors, source=competitors_source)
+        else:
+            raw_responses = await poll_all_models(prompts, pollers, niche_key, region=report.region)
+            competitor_sources_map = (niche or {}).get("competitor_sources") or {}
+
         raw_responses_json = {
             model: {prompt: r.response_text for prompt, r in prompt_map.items()}
             for model, prompt_map in raw_responses.items()
         }
         await update_report_field(db, report_id, raw_responses=raw_responses_json)
 
-        # ===== ШАГ 5.5: Конкуренты ИЗ РЕАЛЬНЫХ ДАННЫХ (метод Profound) =====
-        # Реально упомянутые в ответах ИИ бренды + реальная выдача. Никаких
-        # выдумок. Если нишу/конкурентов взяли из прошлого отчёта (Б1) — не пересчитываем.
-        if not (reused and competitors):
-            await update_report_status(db, report_id, "competitor_discovery", progress=58)
-            client_competitors = (
-                list(report.client_competitors)
-                if isinstance(report.client_competitors, list)
-                else None
-            )
-            competitors, competitors_source, competitor_sources_map = await build_competitor_list(
+        # ===== ШАГ 5.5: Блок Б — кого ИИ называет В НИШЕ (после опроса) =====
+        # MD2 Часть 2: отдельный список «кого ИИ из вашей ниши уже знает»
+        # (1С, Контур и т.п. для регионального B2B). Покажется только если
+        # у Блока А все score~0 (порог Max Score < 20).
+        await update_report_status(db, report_id, "competitor_discovery", progress=58)
+        from app.core.competitor_finder import extract_ai_mentioned_in_niche
+        try:
+            ai_mentioned = await extract_ai_mentioned_in_niche(
+                raw_responses,
                 niche,
                 brand_name=report.brand_name,
-                client_competitors=client_competitors,
-                raw_responses=raw_responses,
+                existing_block_a=competitors or [],
                 count=settings.COMPETITORS_PER_REPORT,
             )
-            # Итер-3 Задача 69: per-name source кладём в niche_data, чтобы PDF
-            # делил конкурентов на «Кого ИИ называет» vs «Прямые из выдачи».
-            try:
-                _niche_with_sources = dict(niche)
-                _niche_with_sources["competitor_sources"] = competitor_sources_map or {}
-                await update_report_field(
-                    db, report_id,
-                    niche_data=_niche_with_sources,
-                    competitors=competitors,
-                    competitors_source=competitors_source,
-                )
-                niche = _niche_with_sources
-            except Exception as exc:
-                logger.warning("competitor_sources_save_failed", error=str(exc))
-                await update_report_field(
-                    db, report_id,
-                    competitors=competitors,
-                    competitors_source=competitors_source,
-                )
+        except Exception as exc:
+            logger.warning("ai_mentioned_in_niche_failed", error=str(exc))
+            ai_mentioned = []
+
+        # Сохраняем оба списка + sources_map в niche_data (без новой миграции).
+        try:
+            _niche_with = dict(niche or {})
+            _niche_with["competitor_sources"] = competitor_sources_map or {}
+            _niche_with["ai_mentioned_in_niche"] = ai_mentioned
+            await update_report_field(
+                db, report_id,
+                niche_data=_niche_with,
+                competitors=competitors,
+                competitors_source=competitors_source,
+            )
+            niche = _niche_with
+        except Exception as exc:
+            logger.warning("ai_mentioned_save_failed", error=str(exc))
+            await update_report_field(
+                db, report_id,
+                competitors=competitors,
+                competitors_source=competitors_source,
+            )
 
         # ===== ШАГ 5.6: Анализ сайтов клиента и конкурентов (Этап 2 ТЗ) =====
         # Делаем параллельно, исключения внутри analyze_site не роняют pipeline.
@@ -372,8 +397,11 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
             # Не блокируем pipeline — без site-analysis отчёт всё равно собирается.
 
         # ===== ШАГ 6: Анализ упоминаний (по тем же ответам, что уже опросили) =====
+        # ВСЕ бренды разом: клиент + Блок А (прямые из выдачи) + Блок Б
+        # (кого ИИ называет в нише). Так у нас единый согласованный список,
+        # без рассинхрона «нашли одних, ищем других» (MD2 Часть 1).
         await update_report_status(db, report_id, "analyzing_responses", progress=70)
-        all_brands = [report.brand_name] + (competitors or [])
+        all_brands = [report.brand_name] + (competitors or []) + (ai_mentioned or [])
         analysis = await analyze_responses(raw_responses, all_brands)
         await update_report_field(db, report_id, analysis=analysis.to_dict())
         await update_report_status(db, report_id, "calculating_score", progress=85)
