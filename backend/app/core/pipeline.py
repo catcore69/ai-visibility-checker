@@ -45,6 +45,7 @@ def _build_pollers(cache, config) -> list:
     from app.llm_pollers.openai_poller import OpenAIPoller
     from app.llm_pollers.yandex_poller import YandexGPTPoller
     from app.llm_pollers.yandex_ai_search_poller import YandexAISearchPoller
+    from app.llm_pollers.google_ai_overview_poller import GoogleAIOverviewPoller
     from app.llm_pollers.gigachat_poller import GigaChatPoller
     from app.llm_pollers.gemini_poller import GeminiPoller
     from app.llm_pollers.deepseek_poller import DeepSeekPoller
@@ -56,6 +57,8 @@ def _build_pollers(cache, config) -> list:
         # Этап 2.4 ТЗ: "alisa" → "yandex_ai_search" (это XMLRiver SERP с AI-блоком,
         # не голосовой ассистент). Старый ключ "alisa" остаётся в БД мигрированным.
         "yandex_ai_search": YandexAISearchPoller,
+        # Симметрично yandex_ai_search: AI-блок в выдаче Google (НЕ Gemini-модель).
+        "google_ai_overview": GoogleAIOverviewPoller,
         "gigachat": GigaChatPoller,
         "gemini": GeminiPoller,
         "deepseek": DeepSeekPoller,
