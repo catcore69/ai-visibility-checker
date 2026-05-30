@@ -15,7 +15,7 @@ class DeepSeekPoller(BasePoller):
             base_url="https://api.deepseek.com",
         )
 
-    async def _query_raw(self, prompt: str) -> str:
+    async def _query_raw(self, prompt: str, region: str = "") -> str:
         try:
             response = await self.client.chat.completions.create(
                 model="deepseek-chat",

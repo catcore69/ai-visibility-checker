@@ -35,7 +35,7 @@ class GigaChatPoller(BasePoller):
             self._token_expires_at = time.time() + 1800
             return self._access_token
 
-    async def _query_raw(self, prompt: str) -> str:
+    async def _query_raw(self, prompt: str, region: str = "") -> str:
         token = await self._get_access_token()
         url = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
         headers = {

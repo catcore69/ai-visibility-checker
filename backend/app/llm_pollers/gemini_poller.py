@@ -14,7 +14,7 @@ class GeminiPoller(BasePoller):
         genai.configure(api_key=config.GEMINI_API_KEY)
         self._model = genai.GenerativeModel(self.model)
 
-    async def _query_raw(self, prompt: str) -> str:
+    async def _query_raw(self, prompt: str, region: str = "") -> str:
         try:
             response = await self._model.generate_content_async(
                 prompt,

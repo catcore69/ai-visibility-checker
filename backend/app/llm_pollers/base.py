@@ -34,11 +34,13 @@ class BasePoller(ABC):
         self.config = config
 
     @abstractmethod
-    async def _query_raw(self, prompt: str) -> str:
-        """Реальный вызов API."""
+    async def _query_raw(self, prompt: str, region: str = "") -> str:
+        """Реальный вызов API. region — регион клиента (для поллеров, которым
+        нужна гео-привязка: yandex_ai_search, google_ai_overview). Остальные
+        могут игнорировать."""
         pass
 
-    async def query(self, prompt: str, niche_key: str) -> LLMResponse:
+    async def query(self, prompt: str, niche_key: str, region: str = "") -> LLMResponse:
         """С кэшем и retry (3 попытки, exponential backoff)."""
         # Срочный фикс: hash() для строк рандомизирован между процессами
         # (PYTHONHASHSEED) → ключ менялся после рестарта воркера и кеш промахивался.
@@ -65,7 +67,7 @@ class BasePoller(ABC):
             try:
                 start = time.monotonic()
                 response_text = await asyncio.wait_for(
-                    self._query_raw(prompt), timeout=call_timeout
+                    self._query_raw(prompt, region=region), timeout=call_timeout
                 )
                 latency = int((time.monotonic() - start) * 1000)
 

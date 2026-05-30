@@ -22,14 +22,19 @@ class YandexAISearchPoller(BasePoller):
     display_name = "Яндекс-поиск с AI-блоком"
     model = "yandex-ai-search"
 
-    async def _query_raw(self, prompt: str) -> str:
+    async def _query_raw(self, prompt: str, region: str = "") -> str:
+        # Гео-привязка: для белорусского клиента — белорусская выдача (lr=BY),
+        # иначе российская. Раньше был хардкод _RU — белорусам приходила РФ-выдача
+        # без локальных фирм.
+        is_by = any(s in (region or "").lower() for s in ("беларус", " рб", "by"))
+        lr = self.config.XMLRIVER_REGION_BY if is_by else self.config.XMLRIVER_REGION_RU
         url = "https://xmlriver.com/search/xml"
         params = {
             "user": self.config.XMLRIVER_USER,
             "key": self.config.XMLRIVER_KEY,
             "query": prompt,
             "groupby": "10",
-            "lr": self.config.XMLRIVER_REGION_RU,
+            "lr": lr,
             "neuro": "1",
         }
 

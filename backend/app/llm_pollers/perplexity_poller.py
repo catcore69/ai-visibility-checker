@@ -8,7 +8,7 @@ class PerplexityPoller(BasePoller):
     display_name = "Perplexity"
     model = "llama-3.1-sonar-small-128k-online"
 
-    async def _query_raw(self, prompt: str) -> str:
+    async def _query_raw(self, prompt: str, region: str = "") -> str:
         url = "https://api.perplexity.ai/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.config.PERPLEXITY_API_KEY}",
