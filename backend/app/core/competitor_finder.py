@@ -242,8 +242,11 @@ async def _xmlriver_google_results(query: str, region: str = "Россия", num
     )
     try:
         async with httpx.AsyncClient(timeout=25.0) as client:
+            # Правильный Google эндпоинт XMLRiver — /search/xml (проверено
+            # рабочим запросом пользователя). /search_google/xml возвращал
+            # пустоту с тем же ключом.
             response = await client.get(
-                "https://xmlriver.com/search_google/xml",
+                "https://xmlriver.com/search/xml",
                 params={
                     "user": settings.XMLRIVER_USER,
                     "key": settings.XMLRIVER_KEY,

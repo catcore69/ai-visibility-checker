@@ -50,7 +50,10 @@ class GoogleAIOverviewPoller(BasePoller):
             if is_by
             else self.config.XMLRIVER_GOOGLE_COUNTRY_RU
         )
-        url = "https://xmlriver.com/search_google/xml"
+        # Правильный эндпоинт по проверенному рабочему запросу пользователя —
+        # /search/xml (это и есть Google + AI Overview); /search_google/xml
+        # возвращал пустоту с тем же ключом. country оставляем для региональности.
+        url = "https://xmlriver.com/search/xml"
         params = {
             "user": self.config.XMLRIVER_USER,
             "key": self.config.XMLRIVER_KEY,
