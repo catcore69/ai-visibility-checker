@@ -510,7 +510,7 @@ async def _find_competitors_via_serp(
         query=query,
         real_domains=len(real_urls),
         found=len(out),
-        rej_no_name=rej_no_name,
+        rej_no_real_site=rej_no_real_site,
         rej_generic=rej_generic,
         rej_wrong_country=rej_wrong_country,
         rej_off_topic=rej_off_topic,
