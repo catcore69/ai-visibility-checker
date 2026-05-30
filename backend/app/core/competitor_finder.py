@@ -235,10 +235,10 @@ async def _xmlriver_google_results(query: str, region: str = "Россия", num
     """
     if not settings.XMLRIVER_USER or not settings.XMLRIVER_KEY:
         return []
-    lr = (
-        settings.XMLRIVER_REGION_BY
-        if ("беларус" in region.lower() or "by" in region.lower())
-        else settings.XMLRIVER_REGION_RU
+    # Для Google нужен ИХ country code (2643=РФ, 2112=РБ), не Yandex lr.
+    is_by = "беларус" in region.lower() or "by" in region.lower()
+    country = (
+        settings.XMLRIVER_GOOGLE_COUNTRY_BY if is_by else settings.XMLRIVER_GOOGLE_COUNTRY_RU
     )
     try:
         async with httpx.AsyncClient(timeout=25.0) as client:
@@ -249,7 +249,7 @@ async def _xmlriver_google_results(query: str, region: str = "Россия", num
                     "key": settings.XMLRIVER_KEY,
                     "query": query,
                     "groupby": str(num),
-                    "country": lr,
+                    "country": country,
                 },
             )
             response.raise_for_status()
@@ -284,7 +284,12 @@ async def _xmlriver_search_results(query: str, region: str = "Россия", num
     try:
         async with httpx.AsyncClient(timeout=25.0) as client:
             response = await client.get(
-                "https://xmlriver.com/search/xml",
+                # Правильный Yandex эндпоинт: /search_yandex/xml. Раньше шли на
+                # /search/xml — это Google по их документации, мы случайно
+                # получали Yandex-подобный ответ только потому что без country
+                # Google отдаёт пустоту, а парсер искал <doc>. См. документацию
+                # XMLRiver, апрель 2024+.
+                "https://xmlriver.com/search_yandex/xml",
                 params={
                     "user": settings.XMLRIVER_USER,
                     "key": settings.XMLRIVER_KEY,
@@ -295,7 +300,7 @@ async def _xmlriver_search_results(query: str, region: str = "Россия", num
             )
             response.raise_for_status()
     except Exception as exc:
-        logger.warning("serp_search_error", query=query, error=str(exc))
+        logger.warning("serp_yandex_error", query=query, error=str(exc))
         return []
 
     out: list[dict] = []
@@ -310,7 +315,7 @@ async def _xmlriver_search_results(query: str, region: str = "Россия", num
                 continue
             out.append({"title": title, "url": url, "domain": _domain_of(url), "source": "yandex"})
     except ET.ParseError as exc:
-        logger.warning("serp_parse_error", query=query, error=str(exc))
+        logger.warning("serp_yandex_parse_error", query=query, error=str(exc))
     return out
 
 

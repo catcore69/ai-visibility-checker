@@ -173,15 +173,33 @@ def _build_query_seeds(niche: dict[str, Any]) -> list[str]:
 
     # Базовая узкая ниша = subcategory если есть, иначе category.
     primary = sub or cat
-    secondary = cat if sub else ""  # category как widening, только если subcategory была.
+    secondary = cat if sub else ""
+
+    # «Аккумуляторы и аксессуары» / «Бухгалтерские услуги» — на такие
+    # многословные сиды suggest вернёт мало. Делаем ещё КОРОТКИЕ сиды
+    # из значимых слов primary (≥5 букв), это даёт основной объём подсказок.
+    primary_keywords: list[str] = []
+    if primary:
+        STOP = {"и", "или", "для", "под", "при", "на", "в", "с", "по"}
+        for tok in primary.split():
+            t = tok.strip("«»\"'.,()-—:;").lower()
+            if t and t not in STOP and len(t) >= 5:
+                primary_keywords.append(t)
 
     seeds: list[str] = []
+    # Полная фраза primary — для точного контекста
     if primary:
         if city:
             seeds.append(f"{primary} {city}")
-        if country_part and country_part.lower() not in ("", "рф", "рб"):
-            seeds.append(f"{primary} {country_part}")
         seeds.append(primary)
+    # Каждое ключевое слово отдельно — для объёма подсказок
+    for kw in primary_keywords:
+        if city:
+            seeds.append(f"{kw} {city}")
+        seeds.append(kw)
+    # Country-level расширение
+    if primary and country_part and country_part.lower() not in ("", "рф", "рб"):
+        seeds.append(f"{primary} {country_part}")
     # category для расширения, если есть отличие
     if secondary and secondary.lower() != primary.lower():
         if city:
