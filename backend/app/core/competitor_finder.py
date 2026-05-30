@@ -89,7 +89,9 @@ async def find_competitor_url(name: str, region: str = "Россия") -> Option
                     "user": settings.XMLRIVER_USER,
                     "key": settings.XMLRIVER_KEY,
                     "query": query,
-                    "groupby": "10",
+                    # groupby БЕЗ loc вызывает error code 104 «Неверный параметр loc!»
+                    # (доказано прогоном на 'аккумуляторы минск'). Без groupby
+                    # XMLRiver возвращает топ результатов сам.
                     "lr": lr,
                 },
             )
@@ -251,8 +253,9 @@ async def _xmlriver_google_results(query: str, region: str = "Россия", num
                     "user": settings.XMLRIVER_USER,
                     "key": settings.XMLRIVER_KEY,
                     "query": query,
-                    "groupby": str(num),
                     "country": country,
+                    # groupby убран — он требует loc и без него XMLRiver кидает
+                    # error 104. По умолчанию вернётся топ-10 результатов.
                 },
             )
             response.raise_for_status()
@@ -297,8 +300,9 @@ async def _xmlriver_search_results(query: str, region: str = "Россия", num
                     "user": settings.XMLRIVER_USER,
                     "key": settings.XMLRIVER_KEY,
                     "query": query,
-                    "groupby": str(num),
                     "lr": lr,
+                    # groupby убран — он требует loc и без него XMLRiver кидает
+                    # error 104. По умолчанию вернётся топ-10 результатов.
                 },
             )
             response.raise_for_status()
