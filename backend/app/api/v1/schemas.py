@@ -122,6 +122,11 @@ class CompetitorRow(BaseModel):
     sov: float
     models_found: int
     dominant_sentiment: str = "neutral"
+    # ТЗ catcore-blok-a-iz-realnoy-vydachi: бейдж для Блока Б.
+    is_other_market: bool = False
+    other_market_label: str = ""
+    site_country: str = ""
+    mentions: int = 0
 
 
 class ModelBreakdownItem(BaseModel):
@@ -230,6 +235,11 @@ class ReportFull(BaseModel):
     top_weakness: Optional[str] = None
 
     competitor_comparison: list[CompetitorRow] = []
+    # ТЗ catcore-blok-a-iz-realnoy-vydachi: Блок А и Блок Б отдельными
+    # секциями. Frontend рендерит две таблицы вместо одной общей.
+    block_a_rows: list[CompetitorRow] = []
+    block_b_rows: list[CompetitorRow] = []
+    show_block_b: bool = False
     model_breakdown: list[ModelBreakdownItem] = []
     prompts_matrix: list[PromptMatrixRow] = []
     models_list: list[ModelListItem] = []

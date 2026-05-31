@@ -57,6 +57,13 @@ _COMPETITOR_URL_BLACKLIST = {
     "tury.ru", "vse-otely.ru", "tonkosti.ru", "oktogo.ru",
     "suntime.ru", "level.travel", "travelata.ru", "onlinetours.ru",
     "tripster.ru", "sputnik8.com", "bigrussia.org",
+    # Каталоги турбаз / отдыха / походов — не отдельные базы, а справочники
+    "mirturbaz.ru", "turbazy.ru", "baza-otdyha.ru", "vse-otdyh.ru",
+    "tropki.ru", "tropa.ru", "marshruty.ru", "nature-travel.ru",
+    "kuda-sxodit.ru", "kudago.com", "trip-point.ru", "otdyhwithdetmi.ru",
+    # Региональные порталы (новости, каталоги, форумы — не отдельные компании)
+    "dvhab.ru", "dv.land", "dvnovosti.ru", "amurmedia.ru", "primamedia.ru",
+    "khabarovsk.bezformata.com", "vl.ru", "newsvl.ru",
     # Бизнес-реестры/каталоги юрлиц (не провайдеры услуги)
     "checko.ru", "rusprofile.ru", "list-org.com", "sbis.ru", "kontur.ru",
     "nalog.ru", "nalog.gov.ru", "egrul.nalog.ru", "egr.gov.by",
@@ -545,12 +552,17 @@ async def _find_competitors_via_serp(
                 if results:
                     query = short_query  # для лога ниже
 
-    # Уникальные реальные домены (без агрегаторов/соцсетей), сохраняем порядок.
+    # Уникальные реальные домены (без агрегаторов/соцсетей и без домена клиента).
+    excl_domains: set[str] = {
+        e.strip().lower()
+        for e in (exclude or [])
+        if e and "." in e and " " not in e
+    }
     seen_domains: set[str] = set()
     real_urls: list[str] = []
     for r in results:
-        d = r.get("domain") or ""
-        if not d or _is_blacklisted_host(d) or d in seen_domains:
+        d = (r.get("domain") or "").lower()
+        if not d or _is_blacklisted_host(d) or d in seen_domains or d in excl_domains:
             continue
         seen_domains.add(d)
         real_urls.append(r["url"])
@@ -766,7 +778,11 @@ async def extract_brands_from_ai_responses(
 
     results = await asyncio.gather(*[_one(c) for c in chunks])
 
-    from app.core.site_analyzer import looks_generic_name
+    from app.core.site_analyzer import (
+        looks_generic_name,
+        looks_like_slogan,
+        is_placeholder_name,
+    )
     brand_l = (brand_name or "").strip().lower()
     counter: dict[str, int] = {}
     canonical: dict[str, str] = {}  # lower → оригинальное написание
@@ -774,7 +790,13 @@ async def extract_brands_from_ai_responses(
         for name in lst:
             n = name.strip()
             nl = n.lower()
-            if not n or nl == brand_l or looks_generic_name(n):
+            if (
+                not n
+                or nl == brand_l
+                or looks_generic_name(n)
+                or looks_like_slogan(n)
+                or is_placeholder_name(n)
+            ):
                 continue
             counter[nl] = counter.get(nl, 0) + 1
             canonical.setdefault(nl, n)
@@ -1030,6 +1052,7 @@ async def build_competitor_list(
     client_competitors: Optional[list[str]],
     count: int = 5,
     ai_citations: Optional[dict] = None,
+    client_url: str = "",
 ) -> tuple[list[str], str, dict[str, str]]:
     """Блок А — каскад из РЕАЛЬНОЙ выдачи (ТЗ catcore-blok-a-iz-realnoy-vydachi):
 
@@ -1049,6 +1072,14 @@ async def build_competitor_list(
     client_list = _normalize_client_competitors(client_competitors, brand_name)[:count]
     sources_map: dict[str, str] = {n.lower(): "client" for n in client_list}
 
+    # Домен клиента — добавляем в exclude, чтобы клиент не попал в Block A
+    # сам (раньше manomadv.ru приходил из SERP первым результатом и проходил,
+    # потому что brand_name="Manomadv" != "manomadv.ru").
+    client_domain = _domain_of(client_url) if client_url else ""
+    base_exclude = [brand_name] + client_list
+    if client_domain:
+        base_exclude.append(client_domain)
+
     if len(client_list) >= count:
         logger.info("competitors_from_client_only", count=len(client_list), brand=brand_name)
         return (
@@ -1065,7 +1096,7 @@ async def build_competitor_list(
                 niche,
                 brand_name=brand_name,
                 ai_citations=ai_citations,
-                exclude=[brand_name] + client_list,
+                exclude=base_exclude,
                 count=count - len(client_list),
             )
         except Exception as exc:
@@ -1080,6 +1111,8 @@ async def build_competitor_list(
     serp_names: list[str] = []
     if len(after_ai) < count:
         exclude = [brand_name] + after_ai
+        if client_domain:
+            exclude.append(client_domain)
         try:
             serp_names = await _find_competitors_via_serp(
                 niche, exclude=exclude, count=count - len(after_ai)
