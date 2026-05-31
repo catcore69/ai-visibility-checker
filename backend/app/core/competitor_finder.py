@@ -520,9 +520,14 @@ async def _find_competitors_via_serp(
                 return w
         return (phrase or "").strip()
 
-    cat = niche.get("category", "") or ""
-    sub = niche.get("subcategory", "") or ""
-    primary = _clean_phrase(sub) or _clean_phrase(cat) or cat.strip()
+    # ТЗ catcore-nisha-primary-secondary: SERP-запрос берёт ТОЛЬКО primary
+    # категорию/подкатегорию. Secondary («рыболовные туры» для агроусадьбы)
+    # не уходят в SERP — иначе запрос «агроусадьба рыболовные туры Хабаровск»
+    # сваливается в рыболовные порталы.
+    from app.core.niche_detector import primary_category, primary_subcategory
+    p_cat = primary_category(niche)
+    p_sub = primary_subcategory(niche)
+    primary = _clean_phrase(p_sub) or _clean_phrase(p_cat) or p_cat.strip()
     region = niche.get("region", "")
     city = _city_from_region(region) or region
     query = " ".join(p for p in [primary, city] if p).strip()
@@ -537,7 +542,7 @@ async def _find_competitors_via_serp(
     # Это страховка, чтобы Block A не падал из-за случайной волатильности
     # XMLRiver. На стабильных запросах второго захода не будет.
     if not results:
-        short_primary = _first_keyword(sub) or _first_keyword(cat)
+        short_primary = _first_keyword(p_sub) or _first_keyword(p_cat)
         if short_primary and short_primary.lower() != primary.lower():
             short_query = " ".join(p for p in [short_primary, city] if p).strip()
             if short_query and short_query.lower() != query.lower():
@@ -655,19 +660,19 @@ async def _find_competitors_via_serp(
 
 
 def _category_keywords(niche: dict[str, Any]) -> list[str]:
-    """Итерация-3, Задача 4 (+v2): отличительные стемы ниши — для проверки,
-    что сайт кандидата реально про эту услугу/товар. Берём стемы И из category,
-    И из subcategory — для «Автоаксессуары / Аккумуляторы для транспорта»
-    получаем ['автоак', 'аккуму', 'транс'], то есть сайт реального магазина
-    аккумуляторов теперь пройдёт по стему «аккуму», даже если category общая.
+    """ТЗ catcore-nisha-primary-secondary: стемы из PRIMARY категории и
+    подкатегории. Secondary НЕ участвуют — иначе категория-фильтр становится
+    расплывчатым: «агроусадьба + рыболовные туры» пускал в Block A
+    рыболовные порталы вместо баз отдыха.
+
+    Реальный профильный сайт повторяет primary-стемы много раз
+    (≥2 для Block A — _site_matches_category min_total=2).
     """
     from app.core.site_analyzer import _GENERIC_WORDS
-    cat = (niche.get("category") or "").strip()
-    sub = (niche.get("subcategory") or "").strip()
-    # ИЗ ОБЕИХ ЧАСТЕЙ — иначе магазин аккумуляторов не проходит фильтр
-    # по category «автоаксессуары» (стем «автоак»), хотя subcategory чётко
-    # сужает до «аккумуляторы».
-    raw = " ".join([cat, sub]).lower()
+    from app.core.niche_detector import primary_category, primary_subcategory
+    p_cat = primary_category(niche)
+    p_sub = primary_subcategory(niche)
+    raw = " ".join([p_cat, p_sub]).lower()
     tokens = [t.strip("«»\"'.,()-—:;") for t in raw.split() if t]
     distinctive = [t for t in tokens if t and t not in _GENERIC_WORDS and len(t) >= 5]
     # стем = первые 6 символов (грубо, но для русского работает).
