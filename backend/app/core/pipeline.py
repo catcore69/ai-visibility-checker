@@ -282,7 +282,7 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
         await update_report_status(db, report_id, "competitor_discovery", progress=58)
         from app.core.competitor_finder import extract_ai_mentioned_in_niche
         try:
-            ai_mentioned = await extract_ai_mentioned_in_niche(
+            ai_mentioned, ai_mentioned_meta = await extract_ai_mentioned_in_niche(
                 raw_responses,
                 niche,
                 brand_name=report.brand_name,
@@ -292,12 +292,14 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
         except Exception as exc:
             logger.warning("ai_mentioned_in_niche_failed", error=str(exc))
             ai_mentioned = []
+            ai_mentioned_meta = {}
 
         # Сохраняем оба списка + sources_map в niche_data (без новой миграции).
         try:
             _niche_with = dict(niche or {})
             _niche_with["competitor_sources"] = competitor_sources_map or {}
             _niche_with["ai_mentioned_in_niche"] = ai_mentioned
+            _niche_with["ai_mentioned_meta"] = ai_mentioned_meta or {}
             await update_report_field(
                 db, report_id,
                 niche_data=_niche_with,

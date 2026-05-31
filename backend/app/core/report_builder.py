@@ -280,6 +280,8 @@ async def build_and_upload_pdf(report, analysis: Analysis, competitors: list[str
     # MD2: Блок А (прямые из выдачи) + Блок Б (кого ИИ называет в нише, из niche_data).
     _niche_dict = report.niche_data if isinstance(report.niche_data, dict) else {}
     ai_mentioned_in_niche: list[str] = list(_niche_dict.get("ai_mentioned_in_niche") or [])
+    # ТЗ Задача 3: метаданные «федеральный игрок» для Блока Б.
+    ai_mentioned_meta: dict = dict(_niche_dict.get("ai_mentioned_meta") or {})
     all_brands = [brand_name] + competitors + ai_mentioned_in_niche
 
     comparison = compare_with_competitors(analysis, brand_name, all_brands)
@@ -291,12 +293,18 @@ async def build_and_upload_pdf(report, analysis: Analysis, competitors: list[str
         nl = (item.get("name") or "").lower()
         if item.get("is_client"):
             item["source"] = "client_self"
+            item["is_federal"] = False
         elif nl in a_names_lc:
             item["source"] = "serp_direct"
+            item["is_federal"] = False
         elif nl in b_names_lc:
             item["source"] = "ai_mentioned"
+            m = ai_mentioned_meta.get(nl) or {}
+            item["is_federal"] = bool(m.get("is_federal"))
+            item["site_country"] = m.get("site_country") or ""
         else:
             item["source"] = "other"
+            item["is_federal"] = False
 
     direct_comparison = [c for c in comparison if c.get("source") in ("serp_direct", "client_self")]
     ai_comparison = [c for c in comparison if c.get("source") in ("ai_mentioned", "client_self")]

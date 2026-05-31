@@ -253,6 +253,10 @@ def build_report_full_payload(report, analysis: Analysis) -> dict[str, Any]:
     # Блок Б: кого ИИ называет в нише — сохранён в niche_data.
     nd = report.niche_data if isinstance(report.niche_data, dict) else {}
     ai_mentioned_in_niche: list[str] = list(nd.get("ai_mentioned_in_niche") or [])
+    # ТЗ Задача 3: для каждого имени из Блока Б знаем, федеральный ли он
+    # (не в регионе клиента). Помечается «федеральный игрок, не локальный
+    # конкурент» в UI/PDF.
+    ai_mentioned_meta: dict = dict(nd.get("ai_mentioned_meta") or {})
     all_brands = [brand_name] + competitors + ai_mentioned_in_niche
 
     def _brand_row(b: str) -> dict:
@@ -282,8 +286,19 @@ def build_report_full_payload(report, analysis: Analysis) -> dict[str, Any]:
     block_a_rows.sort(key=lambda x: (not x["is_client"], -x["score"]))
 
     # Блок Б: клиент (для сравнения) + кого ИИ называет в нише.
+    # Для не-клиентских строк добавляем флаг is_federal из ai_mentioned_meta.
+    def _block_b_row(b: str) -> dict:
+        r = _brand_row(b)
+        if not r["is_client"]:
+            m = ai_mentioned_meta.get(b.lower()) or {}
+            r["is_federal"] = bool(m.get("is_federal"))
+            r["site_country"] = m.get("site_country") or ""
+        else:
+            r["is_federal"] = False
+            r["site_country"] = ""
+        return r
     block_b_rows = (
-        [_brand_row(b) for b in ([brand_name] + ai_mentioned_in_niche)]
+        [_block_b_row(b) for b in ([brand_name] + ai_mentioned_in_niche)]
         if ai_mentioned_in_niche else []
     )
     block_b_rows.sort(key=lambda x: (not x["is_client"], -x["score"]))

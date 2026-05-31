@@ -92,6 +92,7 @@
         <td>
           {% if brand.is_client %}★ {% endif %}<strong>{{ brand.name }}</strong>
           {% if brand.is_client %}<br><span class="meth-muted">(ваш бренд)</span>{% endif %}
+          {% if brand.is_federal %}<br><span class="federal-badge">федеральный игрок, не локальный конкурент</span>{% endif %}
         </td>
         <td style="text-align:center;">
           <strong style="color: {% if brand.is_client %}#A63D3D{% else %}#15171A{% endif %};">{{ brand.score }}</strong>
