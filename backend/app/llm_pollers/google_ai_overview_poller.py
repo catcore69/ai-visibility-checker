@@ -41,41 +41,30 @@ class GoogleAIOverviewPoller(BasePoller):
     model = "google-ai-overview"
 
     async def _query_raw(self, prompt: str, region: str = "") -> str:
-        # Google country: 2643=Россия, 2112=Беларусь (это Google geo IDs,
-        # НЕ Yandex lr). Источник: документация XMLRiver /apidoc/api-about/.
-        # Раньше шли с country=149 (Yandex lr для РБ) → ошибка «Неверный loc».
-        is_by = any(s in (region or "").lower() for s in ("беларус", " рб", "by"))
-        country = (
-            self.config.XMLRIVER_GOOGLE_COUNTRY_BY
-            if is_by
-            else self.config.XMLRIVER_GOOGLE_COUNTRY_RU
-        )
-        # ФИКС 31.05.26 по подсказке поддержки XMLRiver: loc должен быть кодом
-        # ГОРОДА (Criteria ID из geo.csv Google Ads), а не страны.
-        # Раньше шли loc=country=2643/2112 → error 15 «нет результатов»
-        # на всех русских запросах. Контрольный US-запрос (country=2840+
-        # loc=2840) работал, потому что для США 2840 одновременно валиден
-        # как country и как loc в их справочнике, но для РФ/БР loc=страна
-        # не валиден.
-        loc = (
-            self.config.XMLRIVER_GOOGLE_LOC_BY
-            if is_by
-            else self.config.XMLRIVER_GOOGLE_LOC_RU
-        )
-        # Правильный эндпоинт по проверенному рабочему запросу пользователя —
-        # /search/xml (это и есть Google + AI Overview); /search_google/xml
-        # возвращал пустоту с тем же ключом. country оставляем для региональности.
+        # КРИТИЧНЫЙ ФИКС 31.05.26 (после серии curl-тестов с поддержкой):
+        # Для БР-локали (country=2112+loc=2112) XMLRiver возвращает error 15
+        # «нет результатов» на ЛЮБОМ русскоязычном запросе — даже без ai=1,
+        # даже на чистую органику. Это ограничение их сервиса для БР-зоны.
+        # При этом для РФ-локали (country=2643+loc=2643+ai=1+headers) запрос
+        # возвращает 8 KB органики; для US (country=2840+loc=2840) — <ai>
+        # с реальным AI Overview.
+        #
+        # Решение: ВСЕМ русскоязычным клиентам шлём country=loc=RU (2643).
+        # Google AI Overview поймёт из текста запроса («минск», «в Беларуси»),
+        # о каком регионе речь, и упомянёт локальных игроков. Это та же
+        # стратегия, что у Yandex-Нейро (lr=225 для всех). У юзера в браузере
+        # Алиса работает точно так же — её Яндекс/Google по умолчанию идут
+        # под РФ-локалью даже из БР.
+        #
+        # loc=country (страна, не город): подтверждено curl-тестом 31.05 —
+        # с loc=2643 (=country) и headers запрос РАБОТАЕТ; с loc=1011969
+        # (Москва-город) тот же запрос даёт error 15. Поддержка ввела
+        # в заблуждение про «loc=город», на самом деле loc=country валиден.
+        country = self.config.XMLRIVER_GOOGLE_COUNTRY_RU  # 2643 для всех
+        loc = country  # loc=country проверено рабочим
         url = "https://xmlriver.com/search/xml"
-        # КРИТИЧНЫЕ ФИКСЫ (31.05.26, после консультации с поддержкой XMLRiver
-        # и чтения api-about):
-        # 1) loc=код города (Criteria ID из geo.csv Google Ads), не страны.
-        #    Подтверждено поддержкой («loc — конкретный город или хотя бы регион»).
-        #    Раньше шли loc=country → error 15 «нет результатов» на всех русских.
-        # 2) ai=1 — отдельный платный параметр для парсинга «Обзора от ИИ» Google.
-        #    Без него блок <ai><answer> в ответ не подмешивается, даже если
-        #    Google показал AI Overview. Симметричен neuro=1 у Yandex-эндпоинта.
-        #    Источник: https://xmlriver.com/apidoc/api-about/
-        # 3) groupby не передаём — конфликтует с настройками кабинета.
+        # ai=1 — отдельный платный параметр для парсинга «Обзора от ИИ» Google.
+        # Симметричен neuro=1 у Yandex-эндпоинта. Источник: api-about/.
         params = {
             "user": self.config.XMLRIVER_USER,
             "key": self.config.XMLRIVER_KEY,

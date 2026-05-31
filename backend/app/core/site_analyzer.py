@@ -174,6 +174,17 @@ _PLACEHOLDER_IP_RE = re.compile(
     re.IGNORECASE | re.UNICODE,
 )
 
+# Template literals из шаблонизаторов сайта, которые не отрендерились на проде:
+#   $[properties.brand.title]      ← Bitrix24/1С-Битрикс property-syntax
+#   ${product.name}                ← JS template
+#   {{ brand }}                    ← Mustache/Vue/Angular
+#   <%= name %>                    ← ERB / EJS
+# Реальный сайт со сломанным шаблоном кладёт такую строку в og:site_name
+# или в <title>, мы выгребаем её как «бренд», и в отчёт попадает мусор.
+_TEMPLATE_LITERAL_RE = re.compile(
+    r'(\$[\[\{][^\]\}]+[\]\}])|(\{\{\s*[^}]+\s*\}\})|(<%[^%]+%>)',
+)
+
 # Мусорные хвосты в org_name, когда экстрактор зацепил кусок меню/футера.
 _NAME_GARBAGE_TAILS = [
     "главная", "о компании", "о нас", "контакты", "услуги", "цены", "прайс",
@@ -239,10 +250,26 @@ def clean_org_name(name: Optional[str]) -> Optional[str]:
 
 
 def is_placeholder_name(name: str) -> bool:
-    """True для шаблонов ИИ-галлюцинаций «ИП Иванов И.И.» и подобных."""
+    """True для шаблонов ИИ-галлюцинаций и неотрендеренных JSON-LD/og плейсхолдеров.
+
+    Включает:
+    - «ИП Иванов И.И.» (галлюцинация LLM)
+    - «$[properties.brand.title]» (нерендеренный Bitrix property)
+    - «{{ brand }}», «${name}», «<%= title %>» (Mustache/Vue/JS/EJS шаблоны)
+
+    НЕ включает короткие имена: реальные бренды могут быть длиной 2-3 символа
+    в любом регистре («Bat» (bat.by — реальный белорусский АКБ-магазин), «A1»,
+    «M2», «МТС»). Был кейс — фильтр short-Mixed-case отсёк bat.by, который сам
+    клиент ввёл как конкурента. Откат: коротких не отсекаем.
+    """
     if not name:
         return True
-    return bool(_PLACEHOLDER_IP_RE.match(name.strip()))
+    s = name.strip()
+    if _PLACEHOLDER_IP_RE.match(s):
+        return True
+    if _TEMPLATE_LITERAL_RE.search(s):
+        return True
+    return False
 
 # Родовые/служебные слова. «Generic» — это когда ВСЕ значимые слова отсюда
 # (чистая категория «Бухгалтерские услуги»). Если есть хоть один собственный
