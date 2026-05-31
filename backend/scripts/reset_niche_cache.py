@@ -55,14 +55,27 @@ async def wipe_prompt_templates_by_niche(niche_pattern: str) -> list[str]:
 
 async def wipe_redis_by_keyword(keyword: str) -> int:
     """Удаляет все Redis-ключи, содержащие keyword (LLM-ответы pollers).
-    Возвращает число удалённых ключей."""
+
+    Redis-ключи LLM-кеша имеют формат {model}:{niche_key}:{md5}, где niche_key
+    слагифицирован (пробелы → подчёркивания, lowercase). Пробуем несколько
+    форм keyword: оригинал + с подчёркиваниями + по каждому слову.
+    """
     client = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
     total = 0
     try:
-        patterns = [
-            f"*{keyword.lower()}*",
-            f"*{keyword}*",  # для case-mixed niche_key
-        ]
+        kw = keyword.strip()
+        forms: set[str] = set()
+        forms.add(kw)
+        forms.add(kw.lower())
+        # Слагифицированная форма (как в niche_key)
+        forms.add(kw.lower().replace(" ", "_"))
+        # Каждое значимое слово отдельно (≥4 букв) — на случай частичного матча
+        for w in kw.lower().split():
+            w = w.strip("«»\"'.,()-—:;_")
+            if len(w) >= 4:
+                forms.add(w)
+
+        patterns = [f"*{f}*" for f in forms if f]
         for pat in patterns:
             cursor = 0
             while True:
