@@ -233,28 +233,30 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
             else None
         )
 
-        # Если нишу/конкурентов взяли из прошлого отчёта (Б1-reuse) — не пересчитываем.
+        # Задача 1 ТЗ catcore-konkurenty-iz-ai-vydachi: Блок А теперь строится
+        # КАСКАДОМ из AI-выдачи. Это требует raw_responses, поэтому Block A
+        # ЖДЁТ опрос. Раньше шла параллельность Блок А + опрос — но AI-выдача
+        # давала более качественных конкурентов, чем органический SERP
+        # (см. кейс akbtrade.by, где SERP вернул телеком и недвижку как
+        # «конкурентов» магазина АКБ). Параллельность убрана.
         if not (reused and competitors):
-            # Запускаем оба таска параллельно, но НЕ ждём gather'ом — иначе если
-            # опрос завис на одной из моделей, мы теряем готовый Блок А и не
-            # сохраняем его в БД. Сохраняем Блок А сразу, как только готов
-            # (он обычно завершается за 20-40с — быстрее опроса).
-            poll_task = asyncio.create_task(
-                poll_all_models(prompts, pollers, niche_key, region=report.region)
+            raw_responses = await poll_all_models(
+                prompts, pollers, niche_key, region=report.region
             )
-            block_a_task = asyncio.create_task(build_competitor_list(
-                niche,
-                brand_name=report.brand_name,
-                client_competitors=client_competitors,
-                count=settings.COMPETITORS_PER_REPORT,
-            ))
-            # Блок А: ждём, сохраняем СРАЗУ.
+
             try:
-                block_a_result = await block_a_task
-                competitors, competitors_source, competitor_sources_map = block_a_result
-                logger.info("block_a_built", competitors=competitors, source=competitors_source)
-                # Сохраняем Блок А в БД прямо здесь — даже если опрос потом
-                # подвиснет, у отчёта уже будут конкуренты.
+                competitors, competitors_source, competitor_sources_map = await build_competitor_list(
+                    niche,
+                    brand_name=report.brand_name,
+                    client_competitors=client_competitors,
+                    count=settings.COMPETITORS_PER_REPORT,
+                    raw_responses=raw_responses,  # ← каскад через AI-выдачу
+                )
+                logger.info(
+                    "block_a_built",
+                    competitors=competitors,
+                    source=competitors_source,
+                )
                 await update_report_field(
                     db, report_id,
                     competitors=competitors,
@@ -263,8 +265,6 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
             except Exception as exc:
                 logger.error("block_a_failed", error=str(exc))
                 competitors, competitors_source, competitor_sources_map = [], "sparse", {}
-            # Опрос: теперь ждём результат, Блок А уже в безопасности.
-            raw_responses = await poll_task
         else:
             raw_responses = await poll_all_models(prompts, pollers, niche_key, region=report.region)
             competitor_sources_map = (niche or {}).get("competitor_sources") or {}
