@@ -74,7 +74,21 @@ class YandexAISearchPoller(BasePoller):
             "neuro": "1",
         }
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        # Симметричный фикс к Google AI Overview: XMLRiver на /search/xml
+        # без User-Agent/Accept-Language режет русские запросы в антибот
+        # (error 15). /search_yandex/xml сейчас работает и без заголовков,
+        # но добавляем превентивно — стоит копейки, защищает от того же
+        # подвоха на их стороне.
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/126.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/xml,application/xml,*/*;q=0.8",
+            "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+        }
+        async with httpx.AsyncClient(timeout=30.0, headers=headers) as client:
             response = await client.get(url, params=params)
             if response.status_code == 429:
                 raise RateLimitError("XMLRiver rate limit")

@@ -53,8 +53,16 @@ class Settings(BaseSettings):
     XMLRIVER_KEY: str = ""
     XMLRIVER_REGION_RU: str = "225"  # Yandex lr для России
     XMLRIVER_REGION_BY: str = "149"  # Yandex lr для Беларуси
-    XMLRIVER_GOOGLE_COUNTRY_RU: str = "2643"  # Google country ID для России
+    XMLRIVER_GOOGLE_COUNTRY_RU: str = "2643"  # Google country ID для России (countries.xlsx)
     XMLRIVER_GOOGLE_COUNTRY_BY: str = "2112"  # Google country ID для Беларуси
+    # ФИКС 31.05.26 по рекомендации поддержки XMLRiver: loc должен быть кодом
+    # ГОРОДА/РЕГИОНА, а не страны. Источник кодов — geo.csv от Google Ads
+    # (Criteria ID для Target Type=City), его же использует XMLRiver.
+    # 1011969 = Moscow, City, RU (центральная точка для русского региона)
+    # 1001493 = Minsk, City, BY (центральная точка для белорусского региона)
+    # При смене регионального фокуса фаундер может переопределить в .env.
+    XMLRIVER_GOOGLE_LOC_RU: str = "1011969"  # Moscow
+    XMLRIVER_GOOGLE_LOC_BY: str = "1001493"  # Minsk
 
     # === Pipeline ===
     # Этап 2.4 ТЗ: "alisa" заменён на "yandex_ai_search" (честное имя XMLRiver SERP).
