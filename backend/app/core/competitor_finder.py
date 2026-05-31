@@ -182,6 +182,25 @@ def _looks_like_url(s: str) -> bool:
     return bool(re.match(r"^(https?://)?([a-z0-9\-]+\.)+[a-z]{2,}", s))
 
 
+_LEGAL_FORMS = {
+    "ооо", "одо", "уп", "чуп", "чтуп",
+    "ип", "оао", "зао", "ао", "пао",
+}
+
+
+def _starts_with_legal_form(name: str) -> bool:
+    """True если name начинается с юр.формы («ООО Стиген», «ИП Гринь»).
+
+    Для интернет-магазинов юр.имя ничего не говорит клиенту — домен
+    (stigen.by) узнаваем сразу, а «ООО Стиген» абстрактно. Используем
+    это как сигнал «предпочтительнее домен».
+    """
+    if not name:
+        return False
+    first = (name.split() or [""])[0].strip(".,«»\"'-").lower()
+    return first in _LEGAL_FORMS
+
+
 def _normalize_client_competitors(entries: Optional[list[str]], brand_name: str) -> list[str]:
     """Задача 5.2: клиент вводит ССЫЛКИ (или названия), по одной на строку.
 
@@ -566,15 +585,25 @@ async def _find_competitors_via_serp(
             rej_off_topic += 1
             continue
 
-        # 3. Имя. Приоритет: реальное название с сайта; если оно generic («компании»),
-        # плейсхолдер или отсутствует — берём домен как ЧЕСТНУЮ метку. Не теряем
-        # реального конкурента, не показываем мусорное «компании» как бренд.
-        if org_name and not looks_generic_name(org_name) and not is_placeholder_name(org_name):
+        # 3. Имя. Приоритет: реальное название с сайта.
+        # Если оно generic, placeholder ИЛИ начинается с юр.формы
+        # («ООО Стиген», «ИП Гринь») — берём домен. Для интернет-магазинов
+        # домен (stigen.by) узнаваемее юр.имени — клиент сразу видит, какой
+        # это магазин.
+        domain_label = (_domain_of(u) or "").lower()
+        if (
+            org_name
+            and not looks_generic_name(org_name)
+            and not is_placeholder_name(org_name)
+            and not _starts_with_legal_form(org_name)
+        ):
             name = org_name
         else:
-            if org_name:
-                rej_generic += 1  # имя было, но мусорное — для логов
-            name = (_domain_of(u) or "").lower()
+            if org_name and _starts_with_legal_form(org_name):
+                pass  # это нормальный сигнал «лучше показать домен», не мусор
+            elif org_name:
+                rej_generic += 1
+            name = domain_label
         if not name:
             rej_no_real_site += 1
             continue
@@ -825,15 +854,23 @@ async def _find_competitors_from_ai_responses(
         if not _site_matches_category(text, keywords, min_total=2):
             rej_off_topic += 1
             continue
-        # 3. Имя: site_name → orig_name → домен-метка.
+        # 3. Имя: site_name (без юр.формы) → orig_name (без юр.формы) → домен.
+        # Юр.форма («ООО Стиген», «ИП Гринь») = «лучше показать домен»,
+        # клиенту он узнаваемее.
         def _ok(n: str) -> bool:
-            return bool(n) and not looks_generic_name(n) and not is_placeholder_name(n)
+            return (
+                bool(n)
+                and not looks_generic_name(n)
+                and not is_placeholder_name(n)
+                and not _starts_with_legal_form(n)
+            )
+        domain_label = (_domain_of(u) or "").lower()
         if _ok(site_name):
             name = site_name
         elif _ok(orig_name):
             name = orig_name
         else:
-            name = (_domain_of(u) or "").lower()
+            name = domain_label
         if not name:
             rej_generic += 1
             continue
@@ -1053,15 +1090,23 @@ async def extract_ai_mentioned_in_niche(
             rej_off_topic += 1
             continue
 
-        # Имя: site_name → orig_name → домен.
+        # Имя: site_name (без юр.формы) → orig_name (без юр.формы) → домен.
+        # «ООО Стиген»/«ИП Гринь» → лучше показать stigen.by/akb-grin.by:
+        # для клиента это узнаваемее, чем юр.имя.
         def _ok(n: str) -> bool:
-            return bool(n) and not looks_generic_name(n) and not is_placeholder_name(n)
+            return (
+                bool(n)
+                and not looks_generic_name(n)
+                and not is_placeholder_name(n)
+                and not _starts_with_legal_form(n)
+            )
+        domain_label = (_domain_of(u) or "").lower()
         if _ok(site_name):
             name = site_name
         elif _ok(orig_name):
             name = orig_name
         else:
-            name = (_domain_of(u) or "").lower()
+            name = domain_label
         if not name:
             rej_generic += 1
             continue
