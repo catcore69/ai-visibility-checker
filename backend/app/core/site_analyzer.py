@@ -256,9 +256,11 @@ def is_placeholder_name(name: str) -> bool:
     - «ИП Иванов И.И.» (галлюцинация LLM)
     - «$[properties.brand.title]» (нерендеренный Bitrix property)
     - «{{ brand }}», «${name}», «<%= title %>» (Mustache/Vue/JS/EJS шаблоны)
-    - короткие обрезки (<4 символов, не ALL-CAPS, без цифр) — «Bat», «Avs» и т.п.
-      Сохраняем валидные сокращения: «1AK», «АКБ», «BMW» (всё в верхнем регистре
-      или содержат цифры — это нормальные брендовые сокращения).
+
+    НЕ включает короткие имена: реальные бренды могут быть длиной 2-3 символа
+    в любом регистре («Bat» (bat.by — реальный белорусский АКБ-магазин), «A1»,
+    «M2», «МТС»). Был кейс — фильтр short-Mixed-case отсёк bat.by, который сам
+    клиент ввёл как конкурента. Откат: коротких не отсекаем.
     """
     if not name:
         return True
@@ -266,15 +268,6 @@ def is_placeholder_name(name: str) -> bool:
     if _PLACEHOLDER_IP_RE.match(s):
         return True
     if _TEMPLATE_LITERAL_RE.search(s):
-        return True
-    # Короткий обрезок. Реальные короткие бренды:
-    #   «1AK», «АКБ», «BMW», «АЗС», «BAT» (в ALL-CAPS), «А1»
-    # Реальный мусор:
-    #   «Bat» (Mixed-case, скорее всего обрезок <title>Bat...</title>), «Авт»
-    if len(s) < 4:
-        # Если ВСЁ в верхнем регистре ИЛИ есть цифра — оставляем (валидное сокращение).
-        if s == s.upper() or any(c.isdigit() for c in s):
-            return False
         return True
     return False
 
