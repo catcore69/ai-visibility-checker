@@ -439,12 +439,20 @@ async def _find_competitors_via_serp(
         country_from_site,
     )
 
-    # Узкая ниша приоритетнее общей категории: для магазина аккумуляторов
-    # «Аккумуляторы для транспорта Минск» даст реальных продавцов,
-    # а «Автоаксессуары Минск» — мусор от всех смежных магазинов.
+    # Берём ТОЛЬКО первое значимое слово (≥5 букв) из subcategory.
+    # Длинная фраза «Аккумуляторы и аксессуары Минск» XMLRiver возвращает 0 —
+    # реальные запросы людей короткие. «Аккумуляторы Минск» даёт топ-10 магазинов.
+    def _first_keyword(phrase: str) -> str:
+        STOP = {"и", "или", "для", "под", "при", "на", "в", "с", "по", "об"}
+        for w in (phrase or "").split():
+            wn = w.strip("«»\"'.,()-—:;").lower()
+            if wn and wn not in STOP and len(wn) >= 5:
+                return w  # оригинальный регистр сохраняем
+        return (phrase or "").strip()
+
     cat = niche.get("category", "") or ""
     sub = niche.get("subcategory", "") or ""
-    primary = sub.strip() or cat.strip()
+    primary = _first_keyword(sub) or _first_keyword(cat) or cat.strip()
     region = niche.get("region", "")
     city = _city_from_region(region) or region
     query = " ".join(p for p in [primary, city] if p).strip()
@@ -788,9 +796,12 @@ async def extract_ai_mentioned_in_niche(
         text = summ.get("text") or ""
         site_name = (summ.get("org_name") or "").strip()
 
-        # Категория должна совпадать (без region-check — Блок Б принимает
-        # федеральные игроки, региональные ИИ всё равно их называет).
-        if not _site_matches_category(text, keywords):
+        # Категория: для Блока Б смягчаем — ≥1 вхождение стема достаточно.
+        # Иначе ИИ-mentioned бренды массово отсеиваются: магазин «Автотехпоставка»
+        # имеет «аккумулятор» 1 раз на главной, и реально продаёт АКБ, но
+        # min_total=2 его убивал. Блок А (SERP) использует строгий ≥2 — там
+        # источник больше шумит, и фильтр оправдан.
+        if not _site_matches_category(text, keywords, min_total=1):
             rej_off_topic += 1
             continue
 

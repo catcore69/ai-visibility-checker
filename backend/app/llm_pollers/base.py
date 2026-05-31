@@ -89,6 +89,17 @@ class BasePoller(ABC):
             except RateLimitError:
                 wait = 2 ** attempt
                 logger.warning("rate_limit", model=self.name, attempt=attempt, wait=wait)
+                if attempt == 2:
+                    # После 3 rate-limit'ов отдаём ОСМЫСЛЕННУЮ заглушку, а не пустую
+                    # строку. Иначе в БД получаем raw_responses[gemini][prompt]=""
+                    # и в отчёте «real=0, заглушек=0». Сейчас будет «заглушек=N»
+                    # и в PDF понятно, что модель упёрлась в rate-limit.
+                    return LLMResponse(
+                        model_name=self.name,
+                        prompt=prompt,
+                        response_text=f"[{self.name} превысил лимит запросов (rate limit)]",
+                        error="Failed after 3 retries (rate limit)",
+                    )
                 await asyncio.sleep(wait)
             except Exception as exc:
                 logger.error("llm_error", model=self.name, attempt=attempt, error=str(exc))
@@ -96,7 +107,7 @@ class BasePoller(ABC):
                     return LLMResponse(
                         model_name=self.name,
                         prompt=prompt,
-                        response_text="",
+                        response_text=f"[{self.name} вернул ошибку: {str(exc)[:120]}]",
                         error=str(exc),
                     )
                 await asyncio.sleep(2 ** attempt)
