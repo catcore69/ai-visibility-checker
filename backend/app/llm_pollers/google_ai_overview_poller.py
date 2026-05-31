@@ -54,12 +54,21 @@ class GoogleAIOverviewPoller(BasePoller):
         # /search/xml (это и есть Google + AI Overview); /search_google/xml
         # возвращал пустоту с тем же ключом. country оставляем для региональности.
         url = "https://xmlriver.com/search/xml"
+        # КРИТИЧНЫЙ ФИКС (31.05.26): без loc XMLRiver на любой country отвечает
+        # error 104 «Неверный параметр loc». Подтверждено curl-ом:
+        # country=2643/2112 без loc → 100% error 104 (то есть AI Overview
+        # никогда не приходил с момента подключения). С loc=country запрос
+        # проходит, и на запросах, где Google показывает AI Overview, приходит
+        # <ai><answer>base64(html)</answer></ai>. Контрольный US-запрос
+        # «best electric car 2026» с country=2840+loc=2840 вернул блок 333KB.
+        # Коды: те же Google geo IDs (2643=Russia, 2112=Belarus, 2840=USA).
         params = {
             "user": self.config.XMLRIVER_USER,
             "key": self.config.XMLRIVER_KEY,
             "query": prompt,
             "country": country,
-            # groupby убран: требует loc, без него XMLRiver кидает error 104.
+            "loc": country,
+            # groupby убран: тоже требует loc, конфликтует с настройками кабинета.
             # По умолчанию вернётся топ-10 результатов.
         }
         async with httpx.AsyncClient(timeout=30.0) as client:
