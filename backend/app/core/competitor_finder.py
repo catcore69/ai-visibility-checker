@@ -471,6 +471,19 @@ async def _find_competitors_via_serp(
                 words.append(w)
         return " ".join(words)
 
+    def _first_keyword(phrase: str) -> str:
+        """Первое значимое слово (≥5 букв) — для SERP-fallback при пустом
+        результате по полной фразе. XMLRiver на длинных многословных запросах
+        часто отдаёт 0 (например, «Аккумуляторы аксессуары Минск» → 0
+        доменов, а «Аккумуляторы Минск» → 9). Это страховка."""
+        STOP = {"и", "или", "для", "под", "при", "на", "в", "с", "по",
+                "об", "от", "до"}
+        for w in (phrase or "").split():
+            wn = w.strip("«»\"'.,()-—:;").lower()
+            if wn and wn not in STOP and len(wn) >= 5:
+                return w
+        return (phrase or "").strip()
+
     cat = niche.get("category", "") or ""
     sub = niche.get("subcategory", "") or ""
     primary = _clean_phrase(sub) or _clean_phrase(cat) or cat.strip()
@@ -482,6 +495,26 @@ async def _find_competitors_via_serp(
 
     # Итерация-3: Google как основной источник + Yandex как fallback.
     results = await _xmlriver_search_combined(query, region=region, num=20)
+    # ФИКС 31.05: XMLRiver SERP флуктуирует на длинных фразах. Если
+    # «Аккумуляторы аксессуары Минск» вернуло 0, повторяем запрос
+    # сокращённым «Аккумуляторы Минск» (первое значимое слово subcategory).
+    # Это страховка, чтобы Block A не падал из-за случайной волатильности
+    # XMLRiver. На стабильных запросах второго захода не будет.
+    if not results:
+        short_primary = _first_keyword(sub) or _first_keyword(cat)
+        if short_primary and short_primary.lower() != primary.lower():
+            short_query = " ".join(p for p in [short_primary, city] if p).strip()
+            if short_query and short_query.lower() != query.lower():
+                logger.info(
+                    "serp_fallback_short_query",
+                    primary_query=query,
+                    short_query=short_query,
+                )
+                results = await _xmlriver_search_combined(
+                    short_query, region=region, num=20
+                )
+                if results:
+                    query = short_query  # для лога ниже
 
     # Уникальные реальные домены (без агрегаторов/соцсетей), сохраняем порядок.
     seen_domains: set[str] = set()
