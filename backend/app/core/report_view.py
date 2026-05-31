@@ -290,7 +290,8 @@ def build_report_full_payload(report, analysis: Analysis) -> dict[str, Any]:
     # Для не-клиентских строк добавляем флаг is_other_market и подходящий
     # текст бейджа — «республиканский игрок» для клиентов из РБ, иначе
     # «федеральный игрок» (это маркер крупного игрока без местной привязки).
-    is_client_belarus = "беларус" in (region or "").lower()
+    client_region_str = (getattr(report, "region", "") or "")
+    is_client_belarus = "беларус" in client_region_str.lower()
     other_market_label = (
         "республиканский игрок, не локальный конкурент"
         if is_client_belarus
