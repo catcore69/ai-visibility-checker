@@ -24,10 +24,22 @@ _COMPETITOR_URL_BLACKLIST = {
     # Маркетплейсы РФ
     "ozon.ru", "wildberries.ru", "wb.ru", "avito.ru", "youla.ru",
     "drom.ru", "auto.ru", "cian.ru", "yandex.market", "market.yandex.ru",
-    "sbermegamarket.ru", "megamarket.ru",
-    # Маркетплейсы/агрегаторы РБ (Итерация-3 фикс: Куфар не должен быть «конкурентом»)
-    "kufar.by", "av.by", "hata.by", "deal.by", "relax.by", "onliner.by",
-    "praca.by", "rabota.by", "salonbel.by", "1prof.by",
+    "sbermegamarket.ru", "megamarket.ru", "aliexpress.ru", "aliexpress.com",
+    "lamoda.ru", "citilink.ru", "mvideo.ru", "eldorado.ru", "dns-shop.ru",
+    # Маркетплейсы/агрегаторы РБ (Итерация-3: Куфар не должен быть «конкурентом»)
+    "21vek.by", "kufar.by", "av.by", "hata.by", "deal.by", "relax.by",
+    "onliner.by", "praca.by", "rabota.by", "salonbel.by", "1prof.by",
+    "oz.by", "5element.by", "electrosila.by",
+    # Недвижимость (Задача 1, кейс akbtrade.by: gohome.by попадала в Блок А)
+    "gohome.by", "n1.by", "realt.by", "domovita.by", "realty.yandex.ru",
+    "domclick.ru", "n1.ru", "m2.ru",
+    # Телеком/операторы — НЕ конкуренты обычным интернет-магазинам
+    "a1.by", "mts.by", "mts.ru", "life.com.by", "lifeforyou.by",
+    "belka.by", "velcom.by", "beltelecom.by", "byfly.by",
+    "megafon.ru", "tele2.ru", "beeline.ru", "rostelecom.ru",
+    # Авто-порталы и автогазеты (не магазины аккумуляторов/запчастей)
+    "abw.by", "av.by", "auto.by", "autobild.by", "carmania.by",
+    "drive2.ru", "drive2.by", "kolesa.kz",
     # Справочники/карты
     "2gis.ru", "2gis.by", "yandex.ru", "ya.ru", "google.com", "google.ru",
     "yandex.by", "google.by", "maps.google.com",
@@ -35,12 +47,16 @@ _COMPETITOR_URL_BLACKLIST = {
     "tripadvisor.ru", "tripadvisor.com", "booking.com", "ostrovok.ru",
     # Энциклопедии/новости
     "wikipedia.org", "ru.wikipedia.org", "be.wikipedia.org",
+    "tut.by", "onliner.by", "sb.by", "belta.by", "rbc.ru", "lenta.ru",
     # Бизнес-реестры/каталоги юрлиц (не провайдеры услуги)
     "checko.ru", "rusprofile.ru", "list-org.com", "sbis.ru", "kontur.ru",
     "nalog.ru", "nalog.gov.ru", "egrul.nalog.ru", "egr.gov.by",
     "spravka.ru", "yell.ru", "zoon.ru", "zoon.by",
-    # Региональные бизнес-каталоги (типа «vitebsk.biz» — справочник, не фирма)
+    # Региональные бизнес-каталоги
     "vitebsk.biz", "minsk.biz", "by.biz", "byinform.com",
+    # Госорганы и образование (не провайдеры коммерческих услуг)
+    "gov.by", "gov.ru", "gosuslugi.ru", "mos.ru",
+    "edu.by", "edu.ru", "mail.ru", "rambler.ru",
 }
 
 
@@ -439,20 +455,25 @@ async def _find_competitors_via_serp(
         country_from_site,
     )
 
-    # Берём ТОЛЬКО первое значимое слово (≥5 букв) из subcategory.
-    # Длинная фраза «Аккумуляторы и аксессуары Минск» XMLRiver возвращает 0 —
-    # реальные запросы людей короткие. «Аккумуляторы Минск» даёт топ-10 магазинов.
-    def _first_keyword(phrase: str) -> str:
-        STOP = {"и", "или", "для", "под", "при", "на", "в", "с", "по", "об"}
+    # SERP-запрос = subcategory (если есть) или category + город.
+    # ОТКАТ «первого слова» (Задача 1, akbtrade.by-кейс): для subcategory
+    # «автомобильные аккумуляторы» первое слово = «автомобильные» давало
+    # запрос «автомобильные минск» → мусор (телеком, недвижимость).
+    # После фикса User-Agent заголовков XMLRiver принимает и длинные фразы;
+    # «автомобильные аккумуляторы минск» возвращает реальные магазины АКБ.
+    # Стоп-слова из subcategory чистим, чтобы не было «и/или/для» в запросе.
+    def _clean_phrase(phrase: str) -> str:
+        STOP = {"и", "или", "для", "под", "при", "на", "в", "с", "по", "об", "от", "до"}
+        words = []
         for w in (phrase or "").split():
             wn = w.strip("«»\"'.,()-—:;").lower()
-            if wn and wn not in STOP and len(wn) >= 5:
-                return w  # оригинальный регистр сохраняем
-        return (phrase or "").strip()
+            if wn and wn not in STOP:
+                words.append(w)
+        return " ".join(words)
 
     cat = niche.get("category", "") or ""
     sub = niche.get("subcategory", "") or ""
-    primary = _first_keyword(sub) or _first_keyword(cat) or cat.strip()
+    primary = _clean_phrase(sub) or _clean_phrase(cat) or cat.strip()
     region = niche.get("region", "")
     city = _city_from_region(region) or region
     query = " ".join(p for p in [primary, city] if p).strip()
@@ -687,48 +708,209 @@ async def extract_brands_from_ai_responses(
     return out
 
 
+async def _find_competitors_from_ai_responses(
+    niche: dict[str, Any],
+    brand_name: str,
+    raw_responses: dict,
+    exclude: list[str],
+    count: int = 5,
+) -> list[str]:
+    """Задача 1.1 ТЗ: извлекаем РЕГИОНАЛЬНЫХ нишевых конкурентов из ответов ИИ.
+
+    Отличия от extract_ai_mentioned_in_niche (Блок Б):
+    - регион СТРОГО (как в Блоке А SERP) — Блок А обещает прямых региональных
+      конкурентов, не федералов;
+    - категория-фильтр СТРОГИЙ (min_total=2), как в Блоке А SERP;
+    - blacklist агрегаторов/нелокальных доменов применяется.
+
+    Источник: текст ответов всех моделей (включая Yandex Neuro / Google AI
+    Overview). LLM-извлечение брендов через extract_brands_from_ai_responses —
+    разрешённое использование LLM (анализ готового текста, не генерация).
+
+    Не дёргаем citations отдельно: их URL уже всплывают в bra LLM-extraction
+    через имена в тексте, далее find_competitor_url догоняет нужный сайт.
+    """
+    from app.core.site_analyzer import (
+        fetch_site_summary,
+        looks_generic_name,
+        is_placeholder_name,
+        country_from_site,
+    )
+
+    region = niche.get("region", "")
+    client_country = _client_country(region)
+    ai_names = await extract_brands_from_ai_responses(raw_responses, brand_name, niche)
+    excl_lower = {e.strip().lower() for e in (exclude or []) if e}
+    brand_lc = (brand_name or "").lower()
+
+    # Сразу выкидываем плейсхолдеры, дубли с exclude.
+    ai_names = [
+        n for n in ai_names
+        if n and not is_placeholder_name(n)
+        and n.lower() not in excl_lower
+        and n.lower() != brand_lc
+    ]
+    if not ai_names:
+        logger.info("competitors_from_ai_responses_empty", brand=brand_name)
+        return []
+
+    # Каждое имя → SERP-поиск URL. find_competitor_url применяет blacklist.
+    urls = await asyncio.gather(
+        *[find_competitor_url(n, region) for n in ai_names], return_exceptions=True
+    )
+    valid_pairs = [(n, u) for n, u in zip(ai_names, urls) if isinstance(u, str) and u]
+    if not valid_pairs:
+        logger.info("competitors_from_ai_responses_no_urls", brand=brand_name, candidates=len(ai_names))
+        return []
+
+    summaries = await asyncio.gather(
+        *[fetch_site_summary(u) for _, u in valid_pairs], return_exceptions=True
+    )
+    keywords = _category_keywords(niche)
+
+    out: list[str] = []
+    seen: set[str] = set()
+    rej_off_topic = rej_wrong_country = rej_generic = 0
+    for (orig_name, u), summ in zip(valid_pairs, summaries):
+        if not isinstance(summ, dict):
+            continue
+        text = summ.get("text") or ""
+        site_name = (summ.get("org_name") or "").strip()
+
+        # 1. Регион сайта = регион клиента (СТРОГО, это Блок А).
+        if client_country:
+            site_country = country_from_site(u, text)
+            if site_country and site_country != client_country:
+                rej_wrong_country += 1
+                continue
+        # 2. Категория — строго ≥2 повторений стемов (как в Блоке А SERP).
+        if not _site_matches_category(text, keywords, min_total=2):
+            rej_off_topic += 1
+            continue
+        # 3. Имя: site_name → orig_name → домен-метка.
+        def _ok(n: str) -> bool:
+            return bool(n) and not looks_generic_name(n) and not is_placeholder_name(n)
+        if _ok(site_name):
+            name = site_name
+        elif _ok(orig_name):
+            name = orig_name
+        else:
+            name = (_domain_of(u) or "").lower()
+        if not name:
+            rej_generic += 1
+            continue
+        nl = name.lower()
+        if nl in seen or nl in excl_lower or nl == brand_lc:
+            continue
+        seen.add(nl)
+        out.append(name)
+        if len(out) >= count:
+            break
+
+    logger.info(
+        "competitors_from_ai_responses",
+        candidates=len(ai_names),
+        with_url=len(valid_pairs),
+        accepted=len(out),
+        rej_off_topic=rej_off_topic,
+        rej_wrong_country=rej_wrong_country,
+        rej_generic=rej_generic,
+    )
+    return out
+
+
 async def build_competitor_list(
     niche: dict[str, Any],
     brand_name: str,
     client_competitors: Optional[list[str]],
     count: int = 5,
+    raw_responses: Optional[dict] = None,
 ) -> tuple[list[str], str, dict[str, str]]:
-    """Блок А отчёта — ПРЯМЫЕ конкуренты: клиент (форма) + реальная выдача SERP.
+    """Блок А — каскад источников (Задача 1 ТЗ catcore-konkurenty-iz-ai-vydachi):
 
-    Эта функция БОЛЬШЕ НЕ зависит от raw_responses (по ТЗ catcore-zametka-
-    poryadok-pipeline.md, Часть 1): её можно запускать ПАРАЛЛЕЛЬНО опросу
-    моделей через asyncio.gather. Извлечение брендов из ответов ИИ переехало
-    в отдельную функцию extract_ai_mentioned_in_niche() — это Блок Б.
+        1. КЛИЕНТСКИЕ (форма)        → если ≥ count, ТОЛЬКО они, source="client"
+        2. AI-ВЫДАЧА                  → если raw_responses переданы, извлекаем
+                                        региональных нишевых конкурентов из
+                                        ответов ИИ. Если набралось ≥3, источник
+                                        "ai_serp" (или "client+ai_serp").
+        3. ОРГАНИКА (SERP)            → дополняем до count, если выше мало.
+                                        source "ai_serp+serp" или "serp".
+        4. SPARSE                     → если всё < 3, "sparse".
+
+    raw_responses опционален для обратной совместимости. Если None —
+    каскад начинается со SERP (старое поведение). С raw_responses — AI-выдача
+    становится главным источником, как требует ТЗ.
 
     Возвращает (names, overall_source, per_name_source_map).
-    Per-name source: "client" / "serp_direct" (ai_mentioned теперь Блок Б).
     """
     client_list = _normalize_client_competitors(client_competitors, brand_name)[:count]
+
+    sources_map: dict[str, str] = {n.lower(): "client" for n in client_list}
+
     if len(client_list) >= count:
         logger.info("competitors_from_client_only", count=len(client_list), brand=brand_name)
-        return client_list[:count], "client", {n: "client" for n in client_list[:count]}
+        return (
+            client_list[:count],
+            "client",
+            {n: "client" for n in client_list[:count]},
+        )
 
-    # Реальная поисковая выдача (без уже учтённых клиентских).
-    exclude = [brand_name] + client_list
-    serp = await _find_competitors_via_serp(niche, exclude=exclude, count=count)
+    # === Этап 2: AI-выдача (если есть raw_responses) ===
+    ai_names: list[str] = []
+    if raw_responses:
+        try:
+            ai_names = await _find_competitors_from_ai_responses(
+                niche,
+                brand_name=brand_name,
+                raw_responses=raw_responses,
+                exclude=[brand_name] + client_list,
+                count=count - len(client_list),
+            )
+        except Exception as exc:
+            logger.warning("ai_block_a_failed", error=str(exc))
+            ai_names = []
+        for n in ai_names:
+            sources_map.setdefault(n.lower(), "ai_serp")
 
-    # Слияние с приоритетом клиент → выдача.
-    merged = _merge_dedupe(client_list, serp, count)
+    # Что уже есть после клиента + AI
+    after_ai = _merge_dedupe(client_list, ai_names, count)
 
-    sources_map: dict[str, str] = {}
-    for n in client_list:
-        sources_map.setdefault(n.lower(), "client")
-    for n in serp:
-        sources_map.setdefault(n.lower(), "serp_direct")
+    # === Этап 3: SERP-органика как дополнение ===
+    serp_names: list[str] = []
+    if len(after_ai) < count:
+        exclude = [brand_name] + after_ai
+        try:
+            serp_names = await _find_competitors_via_serp(
+                niche, exclude=exclude, count=count - len(after_ai)
+            )
+        except Exception as exc:
+            logger.warning("serp_block_a_failed", error=str(exc))
+            serp_names = []
+        for n in serp_names:
+            sources_map.setdefault(n.lower(), "serp_direct")
+
+    merged = _merge_dedupe(after_ai, serp_names, count)
+
+    # Определяем итоговый источник
+    if client_list and ai_names and not serp_names:
+        source = "client+ai_serp"
+    elif ai_names and not serp_names:
+        source = "ai_serp"
+    elif ai_names and serp_names:
+        source = "ai_serp+serp"
+    elif client_list and not ai_names and not serp_names:
+        source = "client"
+    elif serp_names and not ai_names:
+        source = "verified"  # legacy-имя для «только SERP», совместимо с UI
+    else:
+        source = "sparse"
+
+    if len(merged) < 3:
+        source = "sparse"
+        logger.info("competitors_sparse", count=len(merged), brand=brand_name)
+
     per_name = {n: sources_map.get(n.lower(), "serp_direct") for n in merged[:count]}
-
-    if len(merged) >= 3:
-        source = "client" if (client_list and not serp) else "verified"
-        return merged[:count], source, per_name
-
-    # Реальных конкурентов <3 → честный сигнал «ниша свободна».
-    logger.info("competitors_sparse", count=len(merged), brand=brand_name)
-    return merged[:count], "sparse", per_name
+    return merged[:count], source, per_name
 
 
 async def extract_ai_mentioned_in_niche(
