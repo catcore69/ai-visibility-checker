@@ -84,7 +84,22 @@ class GoogleAIOverviewPoller(BasePoller):
             "loc": loc,
             "ai": "1",
         }
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        # КРИТИЧНЫЙ ФИКС 31.05.26: XMLRiver на /search/xml без User-Agent и
+        # Accept-Language отвечает error 15 «отсутствуют результаты» на ВСЕХ
+        # русских запросах (антибот-фильтр). Подтверждено серией curl-тестов:
+        # тот же URL без заголовков → error 15, с заголовками браузера → 7KB
+        # нормальной выдачи. Поддержка проверяла «у нас в браузере работает»
+        # именно потому, что браузер шлёт эти заголовки. Httpx-дефолт их не шлёт.
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/126.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/xml,application/xml,*/*;q=0.8",
+            "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+        }
+        async with httpx.AsyncClient(timeout=30.0, headers=headers) as client:
             response = await client.get(url, params=params)
             if response.status_code == 429:
                 raise RateLimitError("XMLRiver Google rate limit")
