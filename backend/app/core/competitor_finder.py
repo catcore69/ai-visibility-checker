@@ -743,10 +743,15 @@ async def _find_competitors_from_ai_responses(
     excl_lower = {e.strip().lower() for e in (exclude or []) if e}
     brand_lc = (brand_name or "").lower()
 
-    # Сразу выкидываем плейсхолдеры, дубли с exclude.
+    # Выкидываем плейсхолдеры, generic-имена («21 Век», «Электроника»),
+    # дубли с exclude — ДО SERP-поиска. Если LLM назвала родовую категорию
+    # вместо бренда, по ней find_competitor_url находит сайт-агрегатор,
+    # name=домен после fallback пропускает мусор в Block A.
     ai_names = [
         n for n in ai_names
-        if n and not is_placeholder_name(n)
+        if n
+        and not is_placeholder_name(n)
+        and not looks_generic_name(n)
         and n.lower() not in excl_lower
         and n.lower() != brand_lc
     ]
@@ -950,12 +955,19 @@ async def extract_ai_mentioned_in_niche(
         logger.info("ai_mentioned_in_niche_empty", brand=brand_name)
         return []
 
-    # Плейсхолдеры и совпадения с Блоком А — выкидываем до похода в SERP.
+    # Плейсхолдеры, generic-имена и совпадения с Блоком А — выкидываем до
+    # похода в SERP. Иначе «21 Век», «Электроника» через find_competitor_url
+    # находят сайты, и fallback на домен пропускает мусор в Block B
+    # (отчёт 7916ef57: «21 Век», «Электроника», «Автосила» как «конкуренты»
+    # магазина АКБ — маркетплейс, общая электроника, автозвук).
     block_a_lc = {n.lower() for n in (existing_block_a or [])}
     brand_lc = (brand_name or "").lower()
     ai_names = [
         n for n in ai_names
-        if not is_placeholder_name(n) and n.lower() not in block_a_lc and n.lower() != brand_lc
+        if not is_placeholder_name(n)
+        and not looks_generic_name(n)
+        and n.lower() not in block_a_lc
+        and n.lower() != brand_lc
     ]
     if not ai_names:
         return []
@@ -978,12 +990,14 @@ async def extract_ai_mentioned_in_niche(
         text = summ.get("text") or ""
         site_name = (summ.get("org_name") or "").strip()
 
-        # Категория: для Блока Б смягчаем — ≥1 вхождение стема достаточно.
-        # Иначе ИИ-mentioned бренды массово отсеиваются: магазин «Автотехпоставка»
-        # имеет «аккумулятор» 1 раз на главной, и реально продаёт АКБ, но
-        # min_total=2 его убивал. Блок А (SERP) использует строгий ≥2 — там
-        # источник больше шумит, и фильтр оправдан.
-        if not _site_matches_category(text, keywords, min_total=1):
+        # Категория Block Б: строгий ≥2 вхождения стема (равно Блоку А).
+        # Раньше был min_total=1, чтобы пропустить узких игроков с одним
+        # упоминанием — но это начало пропускать смежные ниши: «Автосила»
+        # (автозвук) имеет «аккумулятор» 1 раз в каталоге, и попадала как
+        # «конкурент» магазина АКБ. После расширения category_keywords
+        # (subcategory+category стемы) ≥2 — нормальный фильтр для профильных
+        # сайтов, неточный отсев приемлем.
+        if not _site_matches_category(text, keywords, min_total=2):
             rej_off_topic += 1
             continue
 
