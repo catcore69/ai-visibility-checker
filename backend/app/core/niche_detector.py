@@ -74,6 +74,20 @@ async def detect_niche(
     # если он передан — не даём модели его перетереть.
     if region:
         niche_data["region"] = region
+    else:
+        # region_detector ничего не нашёл — LLM не имеет права гадать.
+        # Если она всё-таки вернула какой-то регион (нередко галлюцинирует
+        # «Москва»/«Омск»/город из текста отзыва), игнорируем и помечаем
+        # «unknown». Лучше явный unknown, чем угаданный — отчёт сможет
+        # дальше пометить «регион не определён» и попросить клиента уточнить.
+        guessed = (niche_data.get("region") or "").strip().lower()
+        if guessed and guessed != "unknown":
+            logger.warning(
+                "niche_llm_guessed_region_ignored",
+                brand=brand_name,
+                guessed_region=niche_data.get("region"),
+            )
+        niche_data["region"] = "unknown"
 
     # Гарантируем, что подсказка клиента не теряется и остаётся в JSON.
     if hint_clean:

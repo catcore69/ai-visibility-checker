@@ -44,14 +44,17 @@
     мы смотрим — кого упомянули конкуренты.
   </p>
 
-  <!-- Share of Voice bar chart -->
-  <h3 class="meth-h3">Share of Voice — кто звучит громче</h3>
+  <!-- Share of Voice bar chart — ТОЛЬКО Блок А (прямые конкуренты).
+       Блок Б показывается отдельной секцией ниже, чтобы клиент не путал
+       федеральных игроков со своими прямыми региональными конкурентами. -->
+  <h3 class="meth-h3">Share of Voice — прямые конкуренты</h3>
   <p class="meth-text" style="margin-bottom: 3mm;">
-    Доля упоминаний бренда в общем количестве ответов ИИ в вашей нише.
+    Доля упоминаний бренда среди ваших прямых региональных конкурентов
+    в ответах ИИ.
   </p>
 
   <table class="sov-table">
-    {% for brand in competitor_comparison %}
+    {% for brand in direct_comparison %}
     <tr {% if brand.is_client %}class="sov-client"{% endif %}>
       <td class="sov-name">
         {% if brand.is_client %}<span class="sov-star">★</span>{% endif %}

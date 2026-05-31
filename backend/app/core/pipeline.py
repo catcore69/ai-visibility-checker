@@ -198,6 +198,41 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
                 "city": region_info.get("city"),
                 "confidence": region_info.get("confidence"),
             }
+            # Финальный регион. Если region_detector НЕ уверен (confidence != high)
+            # и LLM region_uncertain → НЕ подставляем ничего случайного.
+            # Метка region_uncertain попадает в niche, по ней дальше можно
+            # пометить отчёт «регион требует уточнения».
+            llm_region = (niche.get("region") or "").strip()
+            llm_region_known = llm_region and llm_region.lower() != "unknown"
+            detector_country = (region_info.get("country") or "").lower()
+            detector_confident = (
+                detector_country
+                and detector_country != "unknown"
+                and region_info.get("confidence") in ("high", "medium")
+            )
+            if detector_confident:
+                final_region = effective_region
+                region_uncertain = False
+            elif llm_region_known:
+                # LLM что-то сказала, но region_detector не подтвердил —
+                # доверяем с пометкой «уверенности нет».
+                final_region = llm_region
+                region_uncertain = True
+            else:
+                final_region = ""  # без выдуманного дефолта
+                region_uncertain = True
+            niche["region"] = final_region
+            niche["region_uncertain"] = region_uncertain
+            if region_uncertain:
+                logger.warning(
+                    "region_uncertain",
+                    brand=report.brand_name,
+                    detector_country=region_info.get("country"),
+                    detector_confidence=region_info.get("confidence"),
+                    llm_region=llm_region,
+                    final=final_region,
+                )
+
             # Задача 5.1: бренд определён парсингом — обновляем имя бренда отчёта,
             # если форма прислала только URL-плейсхолдер.
             detected_brand = (niche.get("brand") or "").strip()
@@ -206,7 +241,7 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
                 db, report_id,
                 niche_data=niche,
                 brand_name=effective_brand,
-                region=niche.get("region") or effective_region or report.region,
+                region=final_region or report.region or "",
             )
             # Освежаем объект, чтобы дальше использовать новый бренд.
             report = await get_report(db, report_id)
