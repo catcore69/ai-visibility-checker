@@ -235,16 +235,36 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
 
         # Если нишу/конкурентов взяли из прошлого отчёта (Б1-reuse) — не пересчитываем.
         if not (reused and competitors):
-            poll_task = poll_all_models(prompts, pollers, niche_key, region=report.region)
-            block_a_task = build_competitor_list(
+            # Запускаем оба таска параллельно, но НЕ ждём gather'ом — иначе если
+            # опрос завис на одной из моделей, мы теряем готовый Блок А и не
+            # сохраняем его в БД. Сохраняем Блок А сразу, как только готов
+            # (он обычно завершается за 20-40с — быстрее опроса).
+            poll_task = asyncio.create_task(
+                poll_all_models(prompts, pollers, niche_key, region=report.region)
+            )
+            block_a_task = asyncio.create_task(build_competitor_list(
                 niche,
                 brand_name=report.brand_name,
                 client_competitors=client_competitors,
                 count=settings.COMPETITORS_PER_REPORT,
-            )
-            raw_responses, block_a_result = await asyncio.gather(poll_task, block_a_task)
-            competitors, competitors_source, competitor_sources_map = block_a_result
-            logger.info("block_a_built", competitors=competitors, source=competitors_source)
+            ))
+            # Блок А: ждём, сохраняем СРАЗУ.
+            try:
+                block_a_result = await block_a_task
+                competitors, competitors_source, competitor_sources_map = block_a_result
+                logger.info("block_a_built", competitors=competitors, source=competitors_source)
+                # Сохраняем Блок А в БД прямо здесь — даже если опрос потом
+                # подвиснет, у отчёта уже будут конкуренты.
+                await update_report_field(
+                    db, report_id,
+                    competitors=competitors,
+                    competitors_source=competitors_source,
+                )
+            except Exception as exc:
+                logger.error("block_a_failed", error=str(exc))
+                competitors, competitors_source, competitor_sources_map = [], "sparse", {}
+            # Опрос: теперь ждём результат, Блок А уже в безопасности.
+            raw_responses = await poll_task
         else:
             raw_responses = await poll_all_models(prompts, pollers, niche_key, region=report.region)
             competitor_sources_map = (niche or {}).get("competitor_sources") or {}
