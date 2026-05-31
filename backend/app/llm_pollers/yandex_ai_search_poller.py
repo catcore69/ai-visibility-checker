@@ -35,6 +35,10 @@ def _decode_base64_html(b64: str) -> str:
     return _WS_RE.sub(" ", text).strip()
 
 
+_HREF_RE = re.compile(r'href=["\']([^"\']+)["\']', re.IGNORECASE)
+_URL_INLINE_RE = re.compile(r'https?://[\w\-.]+(?:/[^\s,)\]\'"]*)?', re.IGNORECASE)
+
+
 class YandexAISearchPoller(BasePoller):
     """Парсит выдачу Яндекса с AI-блоком (Нейро) через XMLRiver SERP API.
 
@@ -50,6 +54,40 @@ class YandexAISearchPoller(BasePoller):
     name = "yandex_ai_search"
     display_name = "Яндекс-поиск с AI-блоком"
     model = "yandex-ai-search"
+
+    def __init__(self, cache, config):
+        super().__init__(cache, config)
+        # Citations per prompt — ссылки-источники, которые Алиса упоминает
+        # в ответе. Извлекаются из base64-HTML <content> блока: либо как
+        # <a href="..."> теги, либо как plain-text «1. domain.tld» в списке
+        # источников. Pipeline забирает через consume_citations().
+        self._citations: dict[str, list[str]] = {}
+
+    def consume_citations(self) -> dict[str, list[str]]:
+        out = dict(self._citations)
+        self._citations.clear()
+        return out
+
+    def _extract_citations_from_html(self, html: str) -> list[str]:
+        """Из HTML Алисы: сначала <a href>, потом голые URL в тексте.
+        Дедуп по домену, нормализуем."""
+        urls: list[str] = []
+        seen: set[str] = set()
+        for m in _HREF_RE.findall(html or ""):
+            u = m.strip()
+            if u.startswith("//"):
+                u = "https:" + u
+            if u.startswith(("http://", "https://")) and u not in seen:
+                seen.add(u)
+                urls.append(u)
+        # plain-text «alice.yandex.ru», «habr.com» — после strip-tags
+        text_only = re.sub(r"<[^>]+>", " ", html or "")
+        for m in _URL_INLINE_RE.findall(text_only):
+            u = m.strip().rstrip(".,;:)\"'")
+            if u not in seen:
+                seen.add(u)
+                urls.append(u)
+        return urls[:30]
 
     async def _query_raw(self, prompt: str, region: str = "") -> str:
         # КРИТИЧНЫЙ ФИКС 31.05.26: Яндекс-Нейро для БР-локали (lr=149) AI-блок
@@ -103,8 +141,13 @@ class YandexAISearchPoller(BasePoller):
                 raise RateLimitError("XMLRiver rate limit")
             response.raise_for_status()
 
+            # Сбрасываем предыдущие citations этого вызова и парсим Нейро.
+            self._last_citations = []
             neuro_text = self._extract_neuro_block(response.text)
             if neuro_text:
+                # Привязываем citations к промпту для pipeline'а.
+                if self._last_citations:
+                    self._citations[prompt] = list(self._last_citations)
                 return neuro_text
 
             organic = self._extract_top_organic(response.text, count=3)
@@ -150,6 +193,20 @@ class YandexAISearchPoller(BasePoller):
             content_el = item.find("content")
             raw = (content_el.text or "").strip() if content_el is not None else ""
             if raw:
+                # Декодируем base64 → HTML отдельно, чтобы достать citations.
+                try:
+                    import base64 as _b64
+                    html = _b64.b64decode(raw).decode("utf-8", errors="ignore")
+                except Exception:
+                    html = ""
+                # Citations извлекаем из HTML до strip-tags — там <a href>.
+                if html:
+                    cits = self._extract_citations_from_html(html)
+                    if cits:
+                        # Сохраним под текущий промпт (parent doesn't have it,
+                        # вызывающий код сделает self._citations[prompt] = ...).
+                        # Тут возвращаем «marker» через атрибут last_citations:
+                        self._last_citations = cits
                 decoded = _decode_base64_html(raw)
                 if decoded:
                     return decoded

@@ -296,6 +296,7 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
                     client_competitors=client_competitors,
                     count=settings.COMPETITORS_PER_REPORT,
                     ai_citations=ai_citations,  # реальные URL из <item> AI Overview
+                    client_url=report.url or "",  # чтобы не попасть самим в Block A
                 )
                 logger.info(
                     "block_a_built",

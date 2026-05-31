@@ -302,9 +302,13 @@ export default function ReportPage() {
               Сравнение с конкурентами по всем {report.prompts_count} запросам и{' '}
               {report.models_total} ИИ-моделям.
             </p>
-            <CompetitorChart data={report.competitor_comparison} />
+            <CompetitorChart data={(report.block_a_rows && report.block_a_rows.length > 0) ? report.block_a_rows : report.competitor_comparison} />
 
+            {/* Block A — прямые конкуренты (с fallback на общую таблицу для старых отчётов) */}
             <div className="mt-6 overflow-x-auto">
+              <h3 className="font-heading text-lg mb-3 text-brand-textBright">
+                Ваши прямые конкуренты
+              </h3>
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-brand-border">
@@ -317,7 +321,7 @@ export default function ReportPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {report.competitor_comparison.map((row) => (
+                  {((report.block_a_rows && report.block_a_rows.length > 0) ? report.block_a_rows : report.competitor_comparison).map((row) => (
                     <tr
                       key={row.name}
                       className={[
@@ -360,6 +364,55 @@ export default function ReportPage() {
                 </tbody>
               </table>
             </div>
+
+            {/* Block B — кого ИИ называет в нише (с пометками федеральных) */}
+            {report.show_block_b && report.block_b_rows && report.block_b_rows.length > 0 && (
+              <div className="mt-8 overflow-x-auto">
+                <h3 className="font-heading text-lg mb-2 text-brand-textBright">
+                  Кого ИИ из вашей ниши уже знает
+                </h3>
+                <p className="text-xs text-brand-muted mb-3">
+                  Бренды, которых сами ИИ-ассистенты называют в ответах на запросы вашей ниши.
+                  Это не обязательно ваши прямые конкуренты — часто это крупные федеральные/международные
+                  игроки или продукты другого типа. Но именно их сейчас слышит ваш потенциальный клиент,
+                  когда спрашивает ИИ.
+                </p>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-brand-border">
+                      <th className="text-left py-2 px-3 eyebrow">Бренд</th>
+                      <th className="text-center py-2 px-3 eyebrow">Score</th>
+                      <th className="text-center py-2 px-3 eyebrow">Presence</th>
+                      <th className="text-center py-2 px-3 eyebrow">SoV</th>
+                      <th className="text-center py-2 px-3 eyebrow">Модели</th>
+                      <th className="text-center py-2 px-3 eyebrow">Сент.</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {report.block_b_rows.filter((r) => !r.is_client).map((row) => (
+                      <tr
+                        key={`b-${row.name}`}
+                        className="border-b border-brand-border/60 hover:bg-brand-elevated/40"
+                      >
+                        <td className="py-2.5 px-3 font-medium">
+                          <span className="text-brand-text">{row.name}</span>
+                          {row.other_market_label && (
+                            <div className="text-[10px] mt-1 inline-block px-2 py-0.5 rounded bg-amber-900/30 text-amber-300 border border-amber-700/40">
+                              {row.other_market_label}
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 text-center font-heading text-brand-text">{row.score}</td>
+                        <td className="py-2.5 px-3 text-center text-brand-text">{row.presence_rate}%</td>
+                        <td className="py-2.5 px-3 text-center text-brand-text">{row.sov}%</td>
+                        <td className="py-2.5 px-3 text-center text-brand-text">{row.models_found}/{report.models_total}</td>
+                        <td className="py-2.5 px-3 text-center"><SentimentBadge sentiment={row.dominant_sentiment} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </section>
 

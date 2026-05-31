@@ -82,6 +82,11 @@ export interface CompetitorRow {
   sov: number;
   models_found: number;
   dominant_sentiment: string;
+  // ТЗ catcore-blok-a-iz-realnoy-vydachi: бейдж для Блока Б
+  is_other_market?: boolean;
+  other_market_label?: string;
+  site_country?: string;
+  mentions?: number;
 }
 
 export interface PromptMatrixCell {
@@ -123,6 +128,10 @@ export interface ReportFull {
   weak_models: string[];
   top_weakness?: string;
   competitor_comparison: CompetitorRow[];
+  // ТЗ catcore-blok-a-iz-realnoy-vydachi: разделённые Блок А и Блок Б
+  block_a_rows?: CompetitorRow[];
+  block_b_rows?: CompetitorRow[];
+  show_block_b?: boolean;
   model_breakdown: ModelBreakdown[];
   prompts_matrix: PromptMatrixRow[];
   models_list: { model_name: string; display_name: string; short_name: string }[];
