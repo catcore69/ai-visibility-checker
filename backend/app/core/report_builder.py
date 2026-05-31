@@ -280,8 +280,14 @@ async def build_and_upload_pdf(report, analysis: Analysis, competitors: list[str
     # MD2: Блок А (прямые из выдачи) + Блок Б (кого ИИ называет в нише, из niche_data).
     _niche_dict = report.niche_data if isinstance(report.niche_data, dict) else {}
     ai_mentioned_in_niche: list[str] = list(_niche_dict.get("ai_mentioned_in_niche") or [])
-    # ТЗ Задача 3: метаданные «федеральный игрок» для Блока Б.
+    # ТЗ Задача 3: метаданные для Блока Б — «федеральный/республиканский игрок».
     ai_mentioned_meta: dict = dict(_niche_dict.get("ai_mentioned_meta") or {})
+    is_client_belarus = "беларус" in ((report.region or "")).lower()
+    other_market_label = (
+        "республиканский игрок, не локальный конкурент"
+        if is_client_belarus
+        else "федеральный игрок, не локальный конкурент"
+    )
     all_brands = [brand_name] + competitors + ai_mentioned_in_niche
 
     comparison = compare_with_competitors(analysis, brand_name, all_brands)
@@ -293,18 +299,22 @@ async def build_and_upload_pdf(report, analysis: Analysis, competitors: list[str
         nl = (item.get("name") or "").lower()
         if item.get("is_client"):
             item["source"] = "client_self"
-            item["is_federal"] = False
+            item["is_other_market"] = False
+            item["other_market_label"] = ""
         elif nl in a_names_lc:
             item["source"] = "serp_direct"
-            item["is_federal"] = False
+            item["is_other_market"] = False
+            item["other_market_label"] = ""
         elif nl in b_names_lc:
             item["source"] = "ai_mentioned"
             m = ai_mentioned_meta.get(nl) or {}
-            item["is_federal"] = bool(m.get("is_federal"))
+            item["is_other_market"] = bool(m.get("is_other_market"))
             item["site_country"] = m.get("site_country") or ""
+            item["other_market_label"] = other_market_label if item["is_other_market"] else ""
         else:
             item["source"] = "other"
-            item["is_federal"] = False
+            item["is_other_market"] = False
+            item["other_market_label"] = ""
 
     direct_comparison = [c for c in comparison if c.get("source") in ("serp_direct", "client_self")]
     ai_comparison = [c for c in comparison if c.get("source") in ("ai_mentioned", "client_self")]
@@ -316,11 +326,18 @@ async def build_and_upload_pdf(report, analysis: Analysis, competitors: list[str
         if not any(c.get("is_client") for c in direct_comparison):
             direct_comparison.insert(0, client_row)
 
-    # MD2.2: показ Блока Б — только если у всех в А max Score < 20.
+    # ТЗ Задача 2: показ Блока Б и переключение сценариев — по абсолютному
+    # числу упоминаний клиент+Блок А, а не по Score. Раньше «Score 18 на 1
+    # хите» проскакивал порог 20 и назначал мусорного лидера. С порогом по
+    # упоминаниям лидер назначается только когда данных реально хватает.
+    DIRECT_MENTIONS_MIN = 3
     _non_client_a = [c for c in direct_comparison if not c.get("is_client")]
     max_direct_score = max((c.get("score", 0) for c in _non_client_a), default=0)
-    show_block_b = bool(ai_mentioned_in_niche) and max_direct_score < 20
-    if max_direct_score >= 20:
+    direct_mentions_total = sum(c.get("mentions", 0) for c in direct_comparison)
+    has_real_leader = direct_mentions_total >= DIRECT_MENTIONS_MIN
+
+    show_block_b = bool(ai_mentioned_in_niche) and not has_real_leader
+    if has_real_leader:
         narrative_scenario = "scenario_3"
     elif show_block_b:
         narrative_scenario = "scenario_2"

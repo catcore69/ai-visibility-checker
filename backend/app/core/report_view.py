@@ -274,6 +274,7 @@ def build_report_full_payload(report, analysis: Analysis) -> dict[str, Any]:
             "presence_rate": presence,
             "sov": sov,
             "models_found": models_found,
+            "mentions": len(b_results),  # ТЗ Задача 2: абс. число упоминаний
             "dominant_sentiment": dom_sent,
         }
 
@@ -286,16 +287,26 @@ def build_report_full_payload(report, analysis: Analysis) -> dict[str, Any]:
     block_a_rows.sort(key=lambda x: (not x["is_client"], -x["score"]))
 
     # Блок Б: клиент (для сравнения) + кого ИИ называет в нише.
-    # Для не-клиентских строк добавляем флаг is_federal из ai_mentioned_meta.
+    # Для не-клиентских строк добавляем флаг is_other_market и подходящий
+    # текст бейджа — «республиканский игрок» для клиентов из РБ, иначе
+    # «федеральный игрок» (это маркер крупного игрока без местной привязки).
+    is_client_belarus = "беларус" in (region or "").lower()
+    other_market_label = (
+        "республиканский игрок, не локальный конкурент"
+        if is_client_belarus
+        else "федеральный игрок, не локальный конкурент"
+    )
     def _block_b_row(b: str) -> dict:
         r = _brand_row(b)
         if not r["is_client"]:
             m = ai_mentioned_meta.get(b.lower()) or {}
-            r["is_federal"] = bool(m.get("is_federal"))
+            r["is_other_market"] = bool(m.get("is_other_market"))
             r["site_country"] = m.get("site_country") or ""
+            r["other_market_label"] = other_market_label if r["is_other_market"] else ""
         else:
-            r["is_federal"] = False
+            r["is_other_market"] = False
             r["site_country"] = ""
+            r["other_market_label"] = ""
         return r
     block_b_rows = (
         [_block_b_row(b) for b in ([brand_name] + ai_mentioned_in_niche)]
@@ -303,18 +314,26 @@ def build_report_full_payload(report, analysis: Analysis) -> dict[str, Any]:
     )
     block_b_rows.sort(key=lambda x: (not x["is_client"], -x["score"]))
 
-    # MD2.2 — порог для показа Блока Б: показываем, если у всех в Блоке А
-    # (исключая клиента) max Score < 20. Иначе Блок Б не нужен — главный
-    # аргумент уже есть в Блоке А.
+    # ТЗ Задача 2: порог Сценария 1 и Блока Б — по абсолютному числу
+    # упоминаний, а не по Score. Раньше «Автосила Score 18 на 1 хите» едва
+    # не дотягивала до порога 20 → назначалась лидером с SoV 100% и текстом
+    # «конкурент опережает». Артефакт малой выборки.
+    # Теперь смотрим суммарные упоминания клиент+Блок А по всем
+    # (модель × запрос). Меньше DIRECT_MENTIONS_MIN → данных недостаточно
+    # для назначения лидера, идём в Сценарий 1 (+ Блок Б).
+    DIRECT_MENTIONS_MIN = 3
     non_client_a = [r for r in block_a_rows if not r["is_client"]]
     max_direct_score = max((r["score"] for r in non_client_a), default=0)
-    show_block_b = bool(block_b_rows) and max_direct_score < 20
+    direct_mentions_total = sum(r.get("mentions", 0) for r in block_a_rows)
+    has_real_leader = direct_mentions_total >= DIRECT_MENTIONS_MIN
 
-    # Три сценария для текстового вывода (MD2.2):
-    #   scenario_3 — прямой конкурент в ИИ (есть упоминания в А);
-    #   scenario_2 — прямых не знает, но ИИ знает других в нише;
+    show_block_b = bool(block_b_rows) and not has_real_leader
+
+    # Три сценария для текстового вывода:
+    #   scenario_3 — есть РЕАЛЬНЫЙ прямой лидер (≥ DIRECT_MENTIONS_MIN упоминаний);
+    #   scenario_2 — прямых мало, но ИИ называет других в нише (Блок Б есть);
     #   scenario_1 — рынок полностью пустой.
-    if max_direct_score >= 20:
+    if has_real_leader:
         narrative_scenario = "scenario_3"
     elif show_block_b:
         narrative_scenario = "scenario_2"

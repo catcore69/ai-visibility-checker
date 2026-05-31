@@ -987,27 +987,35 @@ async def extract_ai_mentioned_in_niche(
     seen: set[str] = set()
     rej_off_topic = rej_generic = 0
     federal_count = 0
+    rej_other_country = 0
     for (orig_name, u), summ in zip(valid_pairs, summaries):
         if not isinstance(summ, dict):
             continue
         text = summ.get("text") or ""
         site_name = (summ.get("org_name") or "").strip()
 
-        # Определяем страну сайта для пометки «федеральный игрок» (ТЗ Задача 3).
+        # Регион сайта. Возможные значения:
+        #   "" — TLD/контент не дали сигнала (международный домен .com, .org).
+        #        Это глобальные бренды-производители (Bosch, Varta) — оставляем,
+        #        ИИ называет их в контексте ниши, у клиента может быть как
+        #        перепродажа этих брендов.
+        #   == client_country — сайт в регионе клиента, пропускаем.
+        #   != client_country (конкретно другая страна) — региональный магазин
+        #        из другой страны. Для клиента это не «контекст ниши», это
+        #        просто чужой рынок. ОТСЕИВАЕМ.
         site_country = country_from_site(u, text) if client_country else ""
-        is_federal = bool(
-            client_country
-            and site_country
-            and site_country != client_country
-        )
+        if client_country and site_country and site_country != client_country:
+            rej_other_country += 1
+            continue
 
+        # is_player_in_other_market используется для бейджа в UI:
+        # сайт без явной страны (Bosch.com) → True, помечается «федеральный/
+        # республиканский игрок». Сайт в стране клиента → False, обычная строка.
+        is_player_in_other_market = (
+            not site_country
+            or (client_country and site_country != client_country)
+        )
         # Категория Block Б: строгий ≥2 вхождения стема (равно Блоку А).
-        # Раньше был min_total=1, чтобы пропустить узких игроков с одним
-        # упоминанием — но это начало пропускать смежные ниши: «Автосила»
-        # (автозвук) имеет «аккумулятор» 1 раз в каталоге, и попадала как
-        # «конкурент» магазина АКБ. После расширения category_keywords
-        # (subcategory+category стемы) ≥2 — нормальный фильтр для профильных
-        # сайтов, неточный отсев приемлем.
         if not _site_matches_category(text, keywords, min_total=2):
             rej_off_topic += 1
             continue
@@ -1029,8 +1037,11 @@ async def extract_ai_mentioned_in_niche(
             continue
         seen.add(nl)
         out.append(name)
-        meta[nl] = {"is_federal": is_federal, "site_country": site_country or ""}
-        if is_federal:
+        meta[nl] = {
+            "is_other_market": is_player_in_other_market,
+            "site_country": site_country or "",
+        }
+        if is_player_in_other_market:
             federal_count += 1
         if len(out) >= count:
             break
@@ -1040,8 +1051,9 @@ async def extract_ai_mentioned_in_niche(
         candidates=len(ai_names),
         with_url=len(valid_pairs),
         accepted=len(out),
-        federals=federal_count,
+        other_market_players=federal_count,
         rej_off_topic=rej_off_topic,
+        rej_other_country=rej_other_country,
         rej_generic=rej_generic,
     )
     return out, meta
