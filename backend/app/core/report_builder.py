@@ -326,17 +326,16 @@ async def build_and_upload_pdf(report, analysis: Analysis, competitors: list[str
         if not any(c.get("is_client") for c in direct_comparison):
             direct_comparison.insert(0, client_row)
 
-    # ТЗ Задача 2: показ Блока Б и переключение сценариев — по абсолютному
-    # числу упоминаний клиент+Блок А, а не по Score. Раньше «Score 18 на 1
-    # хите» проскакивал порог 20 и назначал мусорного лидера. С порогом по
-    # упоминаниям лидер назначается только когда данных реально хватает.
+    # ТЗ catcore-blok-a-iz-realnoy-vydachi: Блок Б показывается ВСЕГДА
+    # (отдельной секцией, не конкурирует с Блоком А). DIRECT_MENTIONS_MIN
+    # используется только для narrative_scenario.
     DIRECT_MENTIONS_MIN = 3
     _non_client_a = [c for c in direct_comparison if not c.get("is_client")]
     max_direct_score = max((c.get("score", 0) for c in _non_client_a), default=0)
     direct_mentions_total = sum(c.get("mentions", 0) for c in direct_comparison)
     has_real_leader = direct_mentions_total >= DIRECT_MENTIONS_MIN
 
-    show_block_b = bool(ai_mentioned_in_niche) and not has_real_leader
+    show_block_b = bool(ai_mentioned_in_niche)
     if has_real_leader:
         narrative_scenario = "scenario_3"
     elif show_block_b:

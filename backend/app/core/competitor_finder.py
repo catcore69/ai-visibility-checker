@@ -48,6 +48,15 @@ _COMPETITOR_URL_BLACKLIST = {
     # Энциклопедии/новости
     "wikipedia.org", "ru.wikipedia.org", "be.wikipedia.org",
     "tut.by", "onliner.by", "sb.by", "belta.by", "rbc.ru", "lenta.ru",
+    # Отельные / туристические агрегаторы — каналы продаж, НЕ конкуренты
+    # базам отдыха/гостиницам/агроусадьбам (Booking-подобные).
+    "101hotels.com", "101hotels.ru", "hotels.com", "ostrovok.ru",
+    "sutochno.ru", "tvil.ru", "bronevik.com", "otello.ru",
+    "agoda.com", "airbnb.com", "airbnb.ru", "expedia.com",
+    "hotellook.ru", "hotellook.com", "trivago.ru", "trivago.com",
+    "tury.ru", "vse-otely.ru", "tonkosti.ru", "oktogo.ru",
+    "suntime.ru", "level.travel", "travelata.ru", "onlinetours.ru",
+    "tripster.ru", "sputnik8.com", "bigrussia.org",
     # Бизнес-реестры/каталоги юрлиц (не провайдеры услуги)
     "checko.ru", "rusprofile.ru", "list-org.com", "sbis.ru", "kontur.ru",
     "nalog.ru", "nalog.gov.ru", "egrul.nalog.ru", "egr.gov.by",
@@ -471,6 +480,7 @@ async def _find_competitors_via_serp(
         fetch_site_summary,
         looks_generic_name,
         is_placeholder_name,
+        looks_like_slogan,
         country_from_site,
     )
 
@@ -586,15 +596,16 @@ async def _find_competitors_via_serp(
             continue
 
         # 3. Имя. Приоритет: реальное название с сайта.
-        # Если оно generic, placeholder ИЛИ начинается с юр.формы
-        # («ООО Стиген», «ИП Гринь») — берём домен. Для интернет-магазинов
-        # домен (stigen.by) узнаваемее юр.имени — клиент сразу видит, какой
-        # это магазин.
+        # Если оно generic, placeholder, слоган ИЛИ начинается с юр.формы
+        # («ООО Стиген», «ИП Гринь», «Отдых в гармонии с природой!») —
+        # берём домен. Для интернет-магазинов домен (stigen.by) узнаваемее
+        # юр.имени — клиент сразу видит, какой это магазин.
         domain_label = (_domain_of(u) or "").lower()
         if (
             org_name
             and not looks_generic_name(org_name)
             and not is_placeholder_name(org_name)
+            and not looks_like_slogan(org_name)
             and not _starts_with_legal_form(org_name)
         ):
             name = org_name
@@ -774,6 +785,119 @@ async def extract_brands_from_ai_responses(
     return out
 
 
+async def _find_competitors_from_ai_citations(
+    niche: dict[str, Any],
+    brand_name: str,
+    ai_citations: dict,
+    exclude: list[str],
+    count: int = 5,
+) -> list[str]:
+    """ТЗ catcore-blok-a-iz-realnoy-vydachi: Блок А из РЕАЛЬНОЙ выдачи —
+    citations <item> из Google AI Overview. Это URL, на которые AI Overview
+    реально ссылается в ответе — детерминированные реальные сайты, не
+    галлюцинации генеративных моделей.
+
+    ai_citations = {model_name: {prompt: [url1, url2, ...]}}.
+    Берём все URL, фильтруем blacklist + регион (СТРОГО) + категория (≥2).
+    Имя — site_name → org_name (без юр.формы и слогана) → домен.
+    """
+    from app.core.site_analyzer import (
+        fetch_site_summary,
+        looks_generic_name,
+        is_placeholder_name,
+        looks_like_slogan,
+        country_from_site,
+    )
+
+    region = niche.get("region", "")
+    client_country = _client_country(region)
+    excl_lower = {e.strip().lower() for e in (exclude or []) if e}
+    brand_lc = (brand_name or "").lower()
+
+    # 1) Собираем уникальные URL из всех моделей и промптов.
+    seen_domains: set[str] = set()
+    urls: list[str] = []
+    for _model, pmap in (ai_citations or {}).items():
+        for _prompt, lst in (pmap or {}).items():
+            for u in lst or []:
+                if not isinstance(u, str) or not u.startswith(("http://", "https://")):
+                    continue
+                d = _domain_of(u)
+                if not d or _is_blacklisted_host(d) or d in seen_domains:
+                    continue
+                seen_domains.add(d)
+                urls.append(u)
+    urls = urls[: max(count * 4, 12)]
+    if not urls:
+        logger.info("competitors_from_citations_empty", brand=brand_name)
+        return []
+
+    # 2) Параллельно тянем краткие summary каждого сайта.
+    summaries = await asyncio.gather(
+        *[fetch_site_summary(u) for u in urls], return_exceptions=True
+    )
+    keywords = _category_keywords(niche)
+
+    def _ok_name(n: str) -> bool:
+        return (
+            bool(n)
+            and not looks_generic_name(n)
+            and not is_placeholder_name(n)
+            and not looks_like_slogan(n)
+            and not _starts_with_legal_form(n)
+        )
+
+    out: list[str] = []
+    seen: set[str] = set()
+    rej_off_topic = rej_wrong_country = rej_generic = 0
+    for u, summ in zip(urls, summaries):
+        if not isinstance(summ, dict):
+            continue
+        text = summ.get("text") or ""
+        site_name = (summ.get("org_name") or "").strip()
+
+        # СТРОГИЙ регион: если site_country известен и не совпадает — выкинуть;
+        # если site_country НЕ определён — тоже выкинуть (для Block A нужно
+        # подтверждение региона, иначе .com сайты пробираются как «локальные»).
+        if client_country:
+            site_country = country_from_site(u, text)
+            if not site_country or site_country != client_country:
+                rej_wrong_country += 1
+                continue
+        # Категория ≥2 вхождений стемов (как и SERP-органика Блока А).
+        if not _site_matches_category(text, keywords, min_total=2):
+            rej_off_topic += 1
+            continue
+
+        # Имя: site_name → orig_name (из meta-title — нет ai-name) → домен.
+        domain_label = (_domain_of(u) or "").lower()
+        if _ok_name(site_name):
+            name = site_name
+        else:
+            if site_name and not _ok_name(site_name):
+                rej_generic += 1
+            name = domain_label
+        if not name:
+            continue
+        nl = name.lower()
+        if nl in seen or nl in excl_lower or nl == brand_lc:
+            continue
+        seen.add(nl)
+        out.append(name)
+        if len(out) >= count:
+            break
+
+    logger.info(
+        "competitors_from_citations",
+        citation_urls=len(urls),
+        accepted=len(out),
+        rej_off_topic=rej_off_topic,
+        rej_wrong_country=rej_wrong_country,
+        rej_generic=rej_generic,
+    )
+    return out
+
+
 async def _find_competitors_from_ai_responses(
     niche: dict[str, Any],
     brand_name: str,
@@ -800,6 +924,7 @@ async def _find_competitors_from_ai_responses(
         fetch_site_summary,
         looks_generic_name,
         is_placeholder_name,
+        looks_like_slogan,
         country_from_site,
     )
 
@@ -818,6 +943,7 @@ async def _find_competitors_from_ai_responses(
         if n
         and not is_placeholder_name(n)
         and not looks_generic_name(n)
+        and not looks_like_slogan(n)
         and n.lower() not in excl_lower
         and n.lower() != brand_lc
     ]
@@ -903,27 +1029,24 @@ async def build_competitor_list(
     brand_name: str,
     client_competitors: Optional[list[str]],
     count: int = 5,
-    raw_responses: Optional[dict] = None,
+    ai_citations: Optional[dict] = None,
 ) -> tuple[list[str], str, dict[str, str]]:
-    """Блок А — каскад источников (Задача 1 ТЗ catcore-konkurenty-iz-ai-vydachi):
+    """Блок А — каскад из РЕАЛЬНОЙ выдачи (ТЗ catcore-blok-a-iz-realnoy-vydachi):
 
-        1. КЛИЕНТСКИЕ (форма)        → если ≥ count, ТОЛЬКО они, source="client"
-        2. AI-ВЫДАЧА                  → если raw_responses переданы, извлекаем
-                                        региональных нишевых конкурентов из
-                                        ответов ИИ. Если набралось ≥3, источник
-                                        "ai_serp" (или "client+ai_serp").
-        3. ОРГАНИКА (SERP)            → дополняем до count, если выше мало.
-                                        source "ai_serp+serp" или "serp".
-        4. SPARSE                     → если всё < 3, "sparse".
+        1. КЛИЕНТСКИЕ (форма)         → если ≥ count, ТОЛЬКО они, source="client"
+        2. CITATIONS <item> Google AI Overview → реальные URL из AI-ответа
+                                       (детерминированные сайты, не галлюцинации)
+        3. ОРГАНИКА (SERP)            → дополняем до count
+        4. SPARSE                     → если всё < 3, "sparse"
 
-    raw_responses опционален для обратной совместимости. Если None —
-    каскад начинается со SERP (старое поведение). С raw_responses — AI-выдача
-    становится главным источником, как требует ТЗ.
+    LLM-извлечение брендов из текстов ответов моделей (extract_brands_from_ai_
+    responses) для Блока А БОЛЬШЕ НЕ ИСПОЛЬЗУЕТСЯ — слоганы и агрегаторы
+    прорывались. Эта функция теперь питает только Блок Б.
 
     Возвращает (names, overall_source, per_name_source_map).
+    Источники в map: "client" / "ai_overview" / "serp_direct".
     """
     client_list = _normalize_client_competitors(client_competitors, brand_name)[:count]
-
     sources_map: dict[str, str] = {n.lower(): "client" for n in client_list}
 
     if len(client_list) >= count:
@@ -934,24 +1057,23 @@ async def build_competitor_list(
             {n: "client" for n in client_list[:count]},
         )
 
-    # === Этап 2: AI-выдача (если есть raw_responses) ===
+    # === Этап 2: AI Overview citations (реальные URL из <item>) ===
     ai_names: list[str] = []
-    if raw_responses:
+    if ai_citations:
         try:
-            ai_names = await _find_competitors_from_ai_responses(
+            ai_names = await _find_competitors_from_ai_citations(
                 niche,
                 brand_name=brand_name,
-                raw_responses=raw_responses,
+                ai_citations=ai_citations,
                 exclude=[brand_name] + client_list,
                 count=count - len(client_list),
             )
         except Exception as exc:
-            logger.warning("ai_block_a_failed", error=str(exc))
+            logger.warning("ai_citations_block_a_failed", error=str(exc))
             ai_names = []
         for n in ai_names:
-            sources_map.setdefault(n.lower(), "ai_serp")
+            sources_map.setdefault(n.lower(), "ai_overview")
 
-    # Что уже есть после клиента + AI
     after_ai = _merge_dedupe(client_list, ai_names, count)
 
     # === Этап 3: SERP-органика как дополнение ===
@@ -970,17 +1092,17 @@ async def build_competitor_list(
 
     merged = _merge_dedupe(after_ai, serp_names, count)
 
-    # Определяем итоговый источник
+    # Источник для лога/отчёта
     if client_list and ai_names and not serp_names:
-        source = "client+ai_serp"
+        source = "client+ai_overview"
     elif ai_names and not serp_names:
-        source = "ai_serp"
+        source = "ai_overview"
     elif ai_names and serp_names:
-        source = "ai_serp+serp"
+        source = "ai_overview+serp"
     elif client_list and not ai_names and not serp_names:
         source = "client"
     elif serp_names and not ai_names:
-        source = "verified"  # legacy-имя для «только SERP», совместимо с UI
+        source = "verified"  # legacy-имя для «только SERP»
     else:
         source = "sparse"
 
@@ -1020,6 +1142,7 @@ async def extract_ai_mentioned_in_niche(
         fetch_site_summary,
         looks_generic_name,
         is_placeholder_name,
+        looks_like_slogan,
         country_from_site,
     )
 
@@ -1029,17 +1152,16 @@ async def extract_ai_mentioned_in_niche(
         logger.info("ai_mentioned_in_niche_empty", brand=brand_name)
         return []
 
-    # Плейсхолдеры, generic-имена и совпадения с Блоком А — выкидываем до
-    # похода в SERP. Иначе «21 Век», «Электроника» через find_competitor_url
-    # находят сайты, и fallback на домен пропускает мусор в Block B
-    # (отчёт 7916ef57: «21 Век», «Электроника», «Автосила» как «конкуренты»
-    # магазина АКБ — маркетплейс, общая электроника, автозвук).
+    # Плейсхолдеры, generic, slogan и совпадения с Блоком А — выкидываем
+    # до похода в SERP. ТЗ catcore-blok-a-iz-realnoy-vydachi:
+    # «Отдых в гармонии с природой!» не должно быть в Блоке Б.
     block_a_lc = {n.lower() for n in (existing_block_a or [])}
     brand_lc = (brand_name or "").lower()
     ai_names = [
         n for n in ai_names
         if not is_placeholder_name(n)
         and not looks_generic_name(n)
+        and not looks_like_slogan(n)
         and n.lower() not in block_a_lc
         and n.lower() != brand_lc
     ]
