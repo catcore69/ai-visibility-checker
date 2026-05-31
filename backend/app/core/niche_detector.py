@@ -44,7 +44,10 @@ async def detect_niche(
     response = await client.chat.completions.create(
         model=settings.MODEL_NICHE,
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.3,
+        # temperature=0 — детерминированно. Для одного и того же домена
+        # отчёт должен возвращать ту же нишу/subcategory (иначе ломается
+        # B1-reuse, кеш промптов и SERP-запрос Block A).
+        temperature=0,
         max_tokens=600,
         response_format={"type": "json_object"},
     )
