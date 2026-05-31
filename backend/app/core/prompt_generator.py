@@ -273,6 +273,58 @@ async def _xmlriver_suggest(query: str, region: str = "") -> list[str]:
     return await _xmlriver_tips_batch([query], region=region)
 
 
+async def _xmlriver_related_searches(query: str, region: str = "") -> list[str]:
+    """ТЗ Задача 4.2: Related Searches приходят прямо в Google /search/xml
+    (тег <relatedSearches><query><title>...</title></query></relatedSearches>)
+    БЕЗ дополнительной оплаты — это часть базовой Google-выдачи.
+
+    Дёргаем тот же эндпоинт, что и Google AI Overview (с теми же фикс-параметрами:
+    country=loc=RU, headers с User-Agent), но без ai=1 — нам нужен только
+    блок relatedSearches.
+    """
+    if not settings.XMLRIVER_USER or not settings.XMLRIVER_KEY:
+        return []
+    if not query or not query.strip():
+        return []
+
+    # Для всех русскоязычных регионов используем RU-локаль — XMLRiver на
+    # БР-локали отдаёт error 15 (см. фикс Google AI Overview поллера).
+    country = settings.XMLRIVER_GOOGLE_COUNTRY_RU
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/126.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/xml,application/xml,*/*;q=0.8",
+        "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=15.0, headers=headers) as c:
+            r = await c.get(
+                "https://xmlriver.com/search/xml",
+                params={
+                    "user": settings.XMLRIVER_USER,
+                    "key": settings.XMLRIVER_KEY,
+                    "query": query,
+                    "country": country,
+                    "loc": country,
+                },
+            )
+            r.raise_for_status()
+        root = ET.fromstring(r.text)
+    except Exception as exc:
+        logger.warning("xmlriver_related_error", query=query[:60], error=str(exc))
+        return []
+
+    out: list[str] = []
+    for q in root.findall(".//relatedSearches/query/title"):
+        txt = (q.text or "").strip()
+        if txt:
+            out.append(txt)
+    return out[:20]
+
+
 async def _xmlriver_wordstat(query: str) -> list[str]:
     """Реальные запросы из Яндекс.Wordstat через XMLRiver."""
     if not settings.XMLRIVER_USER or not settings.XMLRIVER_KEY:
@@ -308,6 +360,108 @@ async def _xmlriver_wordstat(query: str) -> list[str]:
         return []
 
 
+async def _expand_seeds_via_llm(
+    niche: dict[str, Any], base_seeds: list[str]
+) -> list[str]:
+    """ТЗ Задача 4.1: один LLM-вызов, чтобы добавить к узким сидам:
+    - синонимы категории («аккумуляторы»/«АКБ»/«батареи»; «бухгалтерия»/«бухучёт»);
+    - интенты («купить»/«замена»/«ремонт»/«цена»/«отзывы»);
+    - сегменты («для авто»/«грузовые»/«для ИП»).
+
+    Возвращает ДОПОЛНИТЕЛЬНЫЕ сиды (синоним+город, синоним+интент+город и т.п.),
+    которые потом отдаются в Google Suggest / XMLRiver tips точно так же,
+    как и базовые сиды. LLM ничего не «сочиняет», просто даёт варианты слов.
+    """
+    cat = (niche.get("category") or "").strip()
+    sub = (niche.get("subcategory") or "").strip()
+    region = (niche.get("region") or "").strip()
+    city = (niche.get("city") or "").strip() or _city_from_region(region)
+    primary = sub or cat
+    if not primary:
+        return []
+
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, base_url=settings.OPENAI_BASE_URL)
+    prompt = (
+        f"Ниша: «{primary}». Регион: «{region or 'Россия'}».\n\n"
+        f"Дай JSON со списками коротких русских слов/фраз (БЕЗ кавычек):\n"
+        f"{{\n"
+        f'  "synonyms": [3-5 синонимов категории],\n'
+        f'  "intents":  [3-5 пользовательских интентов: купить/замена/ремонт/цена/отзывы/доставка/самовывоз/...],\n'
+        f'  "segments": [2-4 сегмента ниши: для авто, грузовых, для ИП, и т.п.]\n'
+        f"}}\n\n"
+        f"Не более 2 слов в каждой строке. Без жаргона. Без брендов. Только русский.\n"
+        f"Если синонимов или сегментов в нише нет — верни пустые массивы.\n"
+        f"Верни ТОЛЬКО JSON, без комментариев и Markdown."
+    )
+    try:
+        resp = await client.chat.completions.create(
+            model=settings.MODEL_TEXT,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            max_tokens=400,
+        )
+        raw = (resp.choices[0].message.content or "{}").strip()
+        raw = raw.strip("```json").strip("```").strip()
+        data = json.loads(raw)
+    except Exception as exc:
+        logger.warning("seeds_llm_expand_error", error=str(exc))
+        return []
+
+    def _norm_list(key: str) -> list[str]:
+        items = data.get(key) or []
+        if not isinstance(items, list):
+            return []
+        out = []
+        for x in items:
+            if isinstance(x, str):
+                s = x.strip().strip("«»\"'.,;:-—")
+                if s and 2 <= len(s) <= 25:
+                    out.append(s)
+        return out[:6]
+
+    synonyms = _norm_list("synonyms")
+    intents = _norm_list("intents")
+    segments = _norm_list("segments")
+
+    seeds: list[str] = []
+    # Синонимы как самостоятельные сиды (синоним + город)
+    for syn in synonyms:
+        if city:
+            seeds.append(f"{syn} {city}")
+        seeds.append(syn)
+    # Синонимы + интент + город (объёмная стратегия)
+    for syn in synonyms[:3]:
+        for intent in intents[:3]:
+            if city:
+                seeds.append(f"{syn} {intent} {city}")
+            else:
+                seeds.append(f"{syn} {intent}")
+    # Primary + сегмент (узкая ниша)
+    for seg in segments:
+        if city:
+            seeds.append(f"{primary} {seg} {city}")
+        else:
+            seeds.append(f"{primary} {seg}")
+
+    # Дедуп
+    seen = {s.strip().lower() for s in base_seeds}
+    out: list[str] = []
+    for s in seeds:
+        sl = s.strip().lower()
+        if sl and sl not in seen:
+            seen.add(sl)
+            out.append(s)
+
+    logger.info(
+        "seeds_llm_expanded",
+        synonyms=len(synonyms),
+        intents=len(intents),
+        segments=len(segments),
+        new_seeds=len(out),
+    )
+    return out[:12]  # лимит, чтобы не разогнать suggest-вызовы
+
+
 async def _fetch_real_queries(niche: dict[str, Any]) -> list[str]:
     """Итерация-3, Задача 2 (ТЗ-1.1): реальные поисковые запросы людей.
 
@@ -316,12 +470,23 @@ async def _fetch_real_queries(niche: dict[str, Any]) -> list[str]:
     Каждый источник опрашиваем по НЕСКОЛЬКИМ сидам (категория+город, категория
     +страна, голая категория). LLM здесь не участвует.
     """
-    seeds = _build_query_seeds(niche)
-    if not seeds:
+    base_seeds = _build_query_seeds(niche)
+    if not base_seeds:
         return []
 
-    # До 6 сидов — иначе много запросов в suggest-эндпоинты.
-    seeds = seeds[:6]
+    # ТЗ Задача 4.1: один LLM-вызов даёт синонимы категории + интенты + сегменты.
+    # Образуются доп. сиды («АКБ Минск», «батареи купить Минск», «аккумуляторы
+    # грузовые Минск») — пул подсказок становится РАЗНООБРАЗНЕЕ, не 5 вариаций
+    # одного слова.
+    try:
+        extra_seeds = await _expand_seeds_via_llm(niche, base_seeds)
+    except Exception as exc:
+        logger.warning("seeds_llm_expand_failed", error=str(exc))
+        extra_seeds = []
+
+    # До 6 базовых + до 12 LLM-расширенных. Дальше — лимит, чтобы не разгонять
+    # количество HTTP-запросов в suggest-эндпоинты.
+    seeds = (base_seeds[:6] + extra_seeds)[:18]
     region_l = (niche.get("region") or "").lower()
     is_rf = "росси" in region_l or "рф" in region_l
 
@@ -330,9 +495,13 @@ async def _fetch_real_queries(niche: dict[str, Any]) -> list[str]:
     # Google suggest — отдельные запросы (открытый API, без оплаты за фразу).
     for seed in seeds:
         tasks.append(_google_suggest(seed))
-    # Яндекс tips — ОДИН батч-POST на все сиды (оплата всё равно за фразу,
-    # но HTTP-запрос один, плюс гео-параметр прокидывается из региона клиента).
+    # Яндекс tips — ОДИН батч-POST на все сиды (оплата за фразу, но HTTP один).
     tasks.append(_xmlriver_tips_batch(seeds, region=region))
+    # ТЗ Задача 4.2: Related Searches из Google /search/xml. Дёргаем по первым
+    # 3 сидам — каждый запрос приносит до 20 смежных запросов «бесплатно»
+    # (это часть базовой Google-выдачи). Этого достаточно для разнообразия.
+    for seed in seeds[:3]:
+        tasks.append(_xmlriver_related_searches(seed, region=region))
     # Wordstat доступен только для РФ-регионов (по конфигу XMLRiver).
     if is_rf:
         for seed in seeds[:3]:
@@ -362,9 +531,13 @@ async def _fetch_real_queries(niche: dict[str, Any]) -> list[str]:
 
     logger.info(
         "real_queries_fetched",
-        seeds=len(seeds),
-        google_yandex_calls=len(seeds) * 2,
-        wordstat_calls=(len(seeds[:3]) if is_rf else 0),
+        base_seeds=len(base_seeds[:6]),
+        llm_extra_seeds=len(extra_seeds),
+        seeds_total=len(seeds),
+        google_suggest_calls=len(seeds),
+        xmlriver_tips_calls=1,
+        related_searches_calls=min(3, len(seeds)),
+        wordstat_calls=(min(3, len(seeds)) if is_rf else 0),
         raw=len(raw),
         unique=len(out),
     )

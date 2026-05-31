@@ -191,6 +191,7 @@ def compare_with_competitors(
                 "sov": sov,
                 "models_found": models_found,
                 "models_total": total_models,
+                "mentions": len(mentioned),  # ТЗ Задача 2: для порога Сценария 1
                 "dominant_sentiment": dominant_sentiment,
             }
         )

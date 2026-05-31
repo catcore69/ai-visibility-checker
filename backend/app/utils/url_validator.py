@@ -19,61 +19,62 @@ from app.utils.logger import get_logger
 logger = get_logger(__name__)
 
 # Чёрный список агрегаторов, соцсетей, маркетплейсов.
-# Если поддомен заканчивается на один из этих хостов — отказ.
-# Список взят из ТЗ + расширен очевидными.
+# Если поддомен заканчивается на один из этих хостов — отказ на /check.
+# Синхронизирован с _COMPETITOR_URL_BLACKLIST в competitor_finder.py
+# (одна правда — что не годится как клиент, то и не годится как конкурент).
 BLACKLIST_DOMAINS = {
-    # Соцсети
-    "vk.com",
-    "instagram.com",
-    "facebook.com",
-    "ok.ru",
-    "t.me",
-    "telegram.org",
-    "twitter.com",
-    "x.com",
-    "youtube.com",
-    "tiktok.com",
-    # Маркетплейсы
-    "ozon.ru",
-    "wildberries.ru",
-    "wb.ru",
-    "ali.com",
-    "aliexpress.ru",
-    "aliexpress.com",
-    "yandex.market",
-    "market.yandex.ru",
-    "sbermegamarket.ru",
-    "megamarket.ru",
-    # Объявления / агрегаторы
-    "avito.ru",
-    "youla.ru",
-    "drom.ru",
-    "auto.ru",
-    "cian.ru",
-    "domclick.ru",
-    # Карты / справочники
-    "2gis.ru",
-    "yandex.ru",
-    "ya.ru",
-    "google.com",
-    "google.ru",
-    # Туризм
-    "tripadvisor.ru",
-    "tripadvisor.com",
-    "booking.com",
-    "ostrovok.ru",
-    "tutu.ru",
-    "aviasales.ru",
-    # Прочие конструкторы / агрегаторы услуг
-    "tilda.ws",
-    "tilda.cc",
-    "tildacdn.com",
-    "wix.com",
-    "wixsite.com",
-    "ucoz.ru",
-    "narod.ru",
-    "profi.ru",
-    "yandex.uslugi",
+    # Соцсети и мессенджеры
+    "vk.com", "instagram.com", "facebook.com", "ok.ru",
+    "t.me", "telegram.org", "twitter.com", "x.com",
+    "youtube.com", "tiktok.com", "linkedin.com",
+    # Маркетплейсы РФ
+    "ozon.ru", "wildberries.ru", "wb.ru",
+    "ali.com", "aliexpress.ru", "aliexpress.com",
+    "yandex.market", "market.yandex.ru",
+    "sbermegamarket.ru", "megamarket.ru",
+    "lamoda.ru", "citilink.ru", "mvideo.ru", "eldorado.ru", "dns-shop.ru",
+    # Маркетплейсы и крупный ритейл РБ
+    "21vek.by", "kufar.by", "av.by", "hata.by", "deal.by",
+    "relax.by", "onliner.by", "praca.by", "rabota.by",
+    "salonbel.by", "1prof.by",
+    "oz.by", "5element.by", "electrosila.by",
+    # Объявления / автоагрегаторы
+    "avito.ru", "youla.ru", "drom.ru", "auto.ru",
+    "abw.by", "auto.by", "autobild.by", "carmania.by",
+    "drive2.ru", "drive2.by", "kolesa.kz",
+    # Недвижимость (отдельная вертикаль, не «компания»)
+    "cian.ru", "domclick.ru", "n1.ru", "m2.ru", "realty.yandex.ru",
+    "gohome.by", "n1.by", "realt.by", "domovita.by",
+    # Карты / поисковики / справочники
+    "2gis.ru", "2gis.by",
+    "yandex.ru", "ya.ru", "yandex.by",
+    "google.com", "google.ru", "google.by", "maps.google.com",
+    "spr.by", "flamp.ru", "flamp.by", "rejting.by",
+    # Энциклопедии / новостные порталы (не «компания»)
+    "wikipedia.org", "ru.wikipedia.org", "be.wikipedia.org",
+    "tut.by", "sb.by", "belta.by", "rbc.ru", "lenta.ru",
+    # Бизнес-реестры и каталоги юрлиц
+    "checko.ru", "rusprofile.ru", "list-org.com", "sbis.ru", "kontur.ru",
+    "nalog.ru", "nalog.gov.ru", "egrul.nalog.ru", "egr.gov.by",
+    "spravka.ru", "yell.ru", "zoon.ru", "zoon.by",
+    "vitebsk.biz", "minsk.biz", "by.biz", "byinform.com",
+    # Госпорталы и образование
+    "gov.by", "gov.ru", "gosuslugi.ru", "mos.ru",
+    "edu.by", "edu.ru",
+    # Телеком-операторы (это инфраструктура, не «компания в нише»)
+    "a1.by", "mts.by", "mts.ru", "life.com.by", "lifeforyou.by",
+    "belka.by", "velcom.by", "beltelecom.by", "byfly.by",
+    "megafon.ru", "tele2.ru", "beeline.ru", "rostelecom.ru",
+    # Туризм / агрегаторы услуг
+    "tripadvisor.ru", "tripadvisor.com", "booking.com",
+    "ostrovok.ru", "tutu.ru", "aviasales.ru",
+    # Email/портальные сервисы — почтовые ящики у компании не «бренд»
+    "mail.ru", "rambler.ru",
+    # Конструкторы сайтов и поддомены — это профиль на платформе, не сайт компании
+    "tilda.ws", "tilda.cc", "tildacdn.com",
+    "wix.com", "wixsite.com",
+    "ucoz.ru", "narod.ru",
+    "profi.ru", "yandex.uslugi",
 }
 
 
@@ -133,9 +134,11 @@ async def validate_url(url: str, do_head_check: bool = True) -> Tuple[bool, str,
         return (
             False,
             normalized,
-            "Инструмент работает с сайтами компаний, не с профилями на "
-            "агрегаторах и соцсетях. Если у вас сайт только на Авито/ВК/"
-            "маркетплейсе — напишите нам напрямую.",
+            "Инструмент работает с сайтами компаний-производителей и "
+            "сервисов, а не с маркетплейсами, агрегаторами, профилями в "
+            "соцсетях и каталогами. Если у вас именно такая площадка — "
+            "напишите нам напрямую: info@catcore.ru, и мы подскажем, что "
+            "подойдёт под вашу задачу.",
         )
 
     # 5. HEAD-запрос (опционально, можно отключить в тестах)

@@ -743,10 +743,15 @@ async def _find_competitors_from_ai_responses(
     excl_lower = {e.strip().lower() for e in (exclude or []) if e}
     brand_lc = (brand_name or "").lower()
 
-    # Сразу выкидываем плейсхолдеры, дубли с exclude.
+    # Выкидываем плейсхолдеры, generic-имена («21 Век», «Электроника»),
+    # дубли с exclude — ДО SERP-поиска. Если LLM назвала родовую категорию
+    # вместо бренда, по ней find_competitor_url находит сайт-агрегатор,
+    # name=домен после fallback пропускает мусор в Block A.
     ai_names = [
         n for n in ai_names
-        if n and not is_placeholder_name(n)
+        if n
+        and not is_placeholder_name(n)
+        and not looks_generic_name(n)
         and n.lower() not in excl_lower
         and n.lower() != brand_lc
     ]
@@ -919,29 +924,29 @@ async def extract_ai_mentioned_in_niche(
     brand_name: str,
     existing_block_a: list[str],
     count: int = 5,
-) -> list[str]:
+) -> tuple[list[str], dict[str, dict]]:
     """Блок Б отчёта: кого ИИ реально называет В ВАШЕЙ НИШЕ.
 
-    По MD2.2: извлекаем бренды из готовых ответов ИИ (это разрешённое
-    использование LLM — извлечение сущностей из текста, НЕ генерация фактов).
-    Для каждого кандидата:
-    - находим сайт через SERP (find_competitor_url);
-    - проверяем что сайт ДЕЙСТВИТЕЛЬНО про эту же нишу
-      (_site_matches_category, стемы из category + subcategory);
-    - отбрасываем имена, уже в Блоке А (избегаем дубля);
-    - отбрасываем плейсхолдеры и родовые названия.
+    По ТЗ catcore-konkurenty-iz-ai-vydachi (Задача 3): для не-локальных
+    игроков добавляем метку «федеральный игрок, не локальный конкурент»,
+    чтобы юзер не считал «1С» прямым конкурентом витебской бухгалтерии.
 
-    Регион сайта НЕ проверяем строго: это ровно тот случай, когда ИИ называет
-    федеральных игроков (Контур, 1С) — они не в регионе клиента, но это
-    «кого ИИ из вашей ниши уже знает». MD2.2 говорит об этом явно.
+    Регион сайта НЕ проверяем строго (это ровно та секция, где ИИ называет
+    федералов), но РАСПОЗНАЁМ его и помечаем — `is_federal=True`, когда
+    страна сайта не совпадает с регионом клиента (или сайт явно межстрановой).
 
-    Возвращает список имён (до count). Используется report-builder'ом для
-    Блока Б, который показывается только если в Блоке А у всех score~0.
+    Возвращает кортеж:
+      - list[str] — имена (до count) в порядке добавления
+      - dict[str_lower, dict] — meta по каждому имени:
+            {"is_federal": bool, "site_country": str}
+
+    Используется report-builder'ом для Блока Б.
     """
     from app.core.site_analyzer import (
         fetch_site_summary,
         looks_generic_name,
         is_placeholder_name,
+        country_from_site,
     )
 
     region = niche.get("region", "")
@@ -950,40 +955,68 @@ async def extract_ai_mentioned_in_niche(
         logger.info("ai_mentioned_in_niche_empty", brand=brand_name)
         return []
 
-    # Плейсхолдеры и совпадения с Блоком А — выкидываем до похода в SERP.
+    # Плейсхолдеры, generic-имена и совпадения с Блоком А — выкидываем до
+    # похода в SERP. Иначе «21 Век», «Электроника» через find_competitor_url
+    # находят сайты, и fallback на домен пропускает мусор в Block B
+    # (отчёт 7916ef57: «21 Век», «Электроника», «Автосила» как «конкуренты»
+    # магазина АКБ — маркетплейс, общая электроника, автозвук).
     block_a_lc = {n.lower() for n in (existing_block_a or [])}
     brand_lc = (brand_name or "").lower()
     ai_names = [
         n for n in ai_names
-        if not is_placeholder_name(n) and n.lower() not in block_a_lc and n.lower() != brand_lc
+        if not is_placeholder_name(n)
+        and not looks_generic_name(n)
+        and n.lower() not in block_a_lc
+        and n.lower() != brand_lc
     ]
     if not ai_names:
-        return []
+        return [], {}
 
     urls = await asyncio.gather(
         *[find_competitor_url(n, region) for n in ai_names], return_exceptions=True
     )
     keywords = _category_keywords(niche)
+    client_country = _client_country(region)
     valid_pairs = [(n, u) for n, u in zip(ai_names, urls) if isinstance(u, str) and u]
     summaries = await asyncio.gather(
         *[fetch_site_summary(u) for _, u in valid_pairs], return_exceptions=True
     )
 
     out: list[str] = []
+    meta: dict[str, dict] = {}
     seen: set[str] = set()
     rej_off_topic = rej_generic = 0
+    federal_count = 0
+    rej_other_country = 0
     for (orig_name, u), summ in zip(valid_pairs, summaries):
         if not isinstance(summ, dict):
             continue
         text = summ.get("text") or ""
         site_name = (summ.get("org_name") or "").strip()
 
-        # Категория: для Блока Б смягчаем — ≥1 вхождение стема достаточно.
-        # Иначе ИИ-mentioned бренды массово отсеиваются: магазин «Автотехпоставка»
-        # имеет «аккумулятор» 1 раз на главной, и реально продаёт АКБ, но
-        # min_total=2 его убивал. Блок А (SERP) использует строгий ≥2 — там
-        # источник больше шумит, и фильтр оправдан.
-        if not _site_matches_category(text, keywords, min_total=1):
+        # Регион сайта. Возможные значения:
+        #   "" — TLD/контент не дали сигнала (международный домен .com, .org).
+        #        Это глобальные бренды-производители (Bosch, Varta) — оставляем,
+        #        ИИ называет их в контексте ниши, у клиента может быть как
+        #        перепродажа этих брендов.
+        #   == client_country — сайт в регионе клиента, пропускаем.
+        #   != client_country (конкретно другая страна) — региональный магазин
+        #        из другой страны. Для клиента это не «контекст ниши», это
+        #        просто чужой рынок. ОТСЕИВАЕМ.
+        site_country = country_from_site(u, text) if client_country else ""
+        if client_country and site_country and site_country != client_country:
+            rej_other_country += 1
+            continue
+
+        # is_player_in_other_market используется для бейджа в UI:
+        # сайт без явной страны (Bosch.com) → True, помечается «федеральный/
+        # республиканский игрок». Сайт в стране клиента → False, обычная строка.
+        is_player_in_other_market = (
+            not site_country
+            or (client_country and site_country != client_country)
+        )
+        # Категория Block Б: строгий ≥2 вхождения стема (равно Блоку А).
+        if not _site_matches_category(text, keywords, min_total=2):
             rej_off_topic += 1
             continue
 
@@ -1004,6 +1037,12 @@ async def extract_ai_mentioned_in_niche(
             continue
         seen.add(nl)
         out.append(name)
+        meta[nl] = {
+            "is_other_market": is_player_in_other_market,
+            "site_country": site_country or "",
+        }
+        if is_player_in_other_market:
+            federal_count += 1
         if len(out) >= count:
             break
 
@@ -1012,10 +1051,12 @@ async def extract_ai_mentioned_in_niche(
         candidates=len(ai_names),
         with_url=len(valid_pairs),
         accepted=len(out),
+        other_market_players=federal_count,
         rej_off_topic=rej_off_topic,
+        rej_other_country=rej_other_country,
         rej_generic=rej_generic,
     )
-    return out
+    return out, meta
 
 
 async def find_competitors(
