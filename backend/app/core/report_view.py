@@ -315,20 +315,19 @@ def build_report_full_payload(report, analysis: Analysis) -> dict[str, Any]:
     )
     block_b_rows.sort(key=lambda x: (not x["is_client"], -x["score"]))
 
-    # ТЗ Задача 2: порог Сценария 1 и Блока Б — по абсолютному числу
-    # упоминаний, а не по Score. Раньше «Автосила Score 18 на 1 хите» едва
-    # не дотягивала до порога 20 → назначалась лидером с SoV 100% и текстом
-    # «конкурент опережает». Артефакт малой выборки.
-    # Теперь смотрим суммарные упоминания клиент+Блок А по всем
-    # (модель × запрос). Меньше DIRECT_MENTIONS_MIN → данных недостаточно
-    # для назначения лидера, идём в Сценарий 1 (+ Блок Б).
+    # ТЗ catcore-blok-a-iz-realnoy-vydachi: Блок Б показывается ВСЕГДА
+    # (если он не пустой). Это отдельная секция «кого ИИ держит в голове»,
+    # она НЕ конкурирует с Блоком А и должна быть видна всегда — клиент
+    # должен знать, кого ИИ называет в нише, даже если у него есть прямые
+    # региональные конкуренты.
+    # DIRECT_MENTIONS_MIN продолжает влиять на narrative_scenario.
     DIRECT_MENTIONS_MIN = 3
     non_client_a = [r for r in block_a_rows if not r["is_client"]]
     max_direct_score = max((r["score"] for r in non_client_a), default=0)
     direct_mentions_total = sum(r.get("mentions", 0) for r in block_a_rows)
     has_real_leader = direct_mentions_total >= DIRECT_MENTIONS_MIN
 
-    show_block_b = bool(block_b_rows) and not has_real_leader
+    show_block_b = bool(block_b_rows)
 
     # Три сценария для текстового вывода:
     #   scenario_3 — есть РЕАЛЬНЫЙ прямой лидер (≥ DIRECT_MENTIONS_MIN упоминаний);

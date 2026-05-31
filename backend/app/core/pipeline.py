@@ -279,13 +279,23 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
                 prompts, pollers, niche_key, region=report.region
             )
 
+            # ТЗ catcore-blok-a-iz-realnoy-vydachi: Блок А строится из
+            # citations Google AI Overview <item> + органики SERP. НЕ из
+            # LLM-извлечения по текстам моделей (это галлюцинирующий
+            # источник — слоганы и агрегаторы прорывались в Блок А).
+            ai_citations: dict[str, list[str]] = {}
+            for poller in pollers:
+                if hasattr(poller, "consume_citations"):
+                    cits = poller.consume_citations() or {}
+                    if cits:
+                        ai_citations[poller.name] = cits
             try:
                 competitors, competitors_source, competitor_sources_map = await build_competitor_list(
                     niche,
                     brand_name=report.brand_name,
                     client_competitors=client_competitors,
                     count=settings.COMPETITORS_PER_REPORT,
-                    raw_responses=raw_responses,  # ← каскад через AI-выдачу
+                    ai_citations=ai_citations,  # реальные URL из <item> AI Overview
                 )
                 logger.info(
                     "block_a_built",
@@ -335,6 +345,10 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
             _niche_with["competitor_sources"] = competitor_sources_map or {}
             _niche_with["ai_mentioned_in_niche"] = ai_mentioned
             _niche_with["ai_mentioned_meta"] = ai_mentioned_meta or {}
+            # Сохраняем citations AI Overview для прозрачности/повторного использования.
+            _cits = locals().get("ai_citations")
+            if _cits:
+                _niche_with["ai_citations"] = _cits
             await update_report_field(
                 db, report_id,
                 niche_data=_niche_with,

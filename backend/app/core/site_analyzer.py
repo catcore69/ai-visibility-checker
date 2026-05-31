@@ -249,6 +249,45 @@ def clean_org_name(name: Optional[str]) -> Optional[str]:
     return s or None
 
 
+_IMPERATIVE_VERBS = (
+    "отдыхай", "приезжай", "выбирай", "заказывай", "забронируй",
+    "насладит", "посети", "купи", "узнай", "получи", "оставь",
+    "звони", "обратись", "доверь", "попробуй", "смотри",
+    "rest", "enjoy", "book", "choose", "discover", "explore",
+)
+
+
+def looks_like_slogan(name: str) -> bool:
+    """True если строка похожа на слоган/призыв, а не на название компании.
+
+    Примеры мусора, который раньше прорывался в Block A:
+      - «Отдых в гармонии с природой!»  (восклицание + общие слова)
+      - «Приезжайте к нам отдохнуть»     (императив + предлоги)
+      - «Best place to stay in Khabarovsk» (длинная фраза)
+
+    Логика:
+      - Содержит «!» или «?» → почти всегда слоган.
+      - >5 слов → не имя собственное.
+      - Длина >50 символов → не имя.
+      - Начинается с глагола в личной форме (отдыхайте, приезжайте, и т.п.).
+    """
+    if not name:
+        return False
+    s = name.strip()
+    if "!" in s or "?" in s:
+        return True
+    if len(s) > 50:
+        return True
+    words = s.split()
+    if len(words) > 5:
+        return True
+    first = words[0].lower().strip("«»\"'.,;:-—")
+    for verb in _IMPERATIVE_VERBS:
+        if first.startswith(verb):
+            return True
+    return False
+
+
 def is_placeholder_name(name: str) -> bool:
     """True для шаблонов ИИ-галлюцинаций и неотрендеренных JSON-LD/og плейсхолдеров.
 

@@ -40,6 +40,21 @@ class GoogleAIOverviewPoller(BasePoller):
     display_name = "Google AI Overview"
     model = "google-ai-overview"
 
+    def __init__(self, cache, config):
+        super().__init__(cache, config)
+        # Citations per prompt — собираются в _query_raw, забираются pipeline'ом
+        # после opроса для построения Блока А «прямые конкуренты». Это URL,
+        # на которые AI Overview ссылается — детерминированные реальные сайты,
+        # не галлюцинации LLM-моделей. См. ТЗ catcore-blok-a-iz-realnoy-vydachi.
+        self._citations: dict[str, list[str]] = {}
+
+    def consume_citations(self) -> dict[str, list[str]]:
+        """Pipeline вызывает после polling, чтобы забрать citations
+        и сбросить storage. Формат: {prompt: [url, url, ...]}."""
+        out = dict(self._citations)
+        self._citations.clear()
+        return out
+
     async def _query_raw(self, prompt: str, region: str = "") -> str:
         # КРИТИЧНЫЙ ФИКС 31.05.26 (после серии curl-тестов с поддержкой):
         # Для БР-локали (country=2112+loc=2112) XMLRiver возвращает error 15
@@ -93,6 +108,15 @@ class GoogleAIOverviewPoller(BasePoller):
             if response.status_code == 429:
                 raise RateLimitError("XMLRiver Google rate limit")
             response.raise_for_status()
+            # Citations (URL-источники AI Overview) сохраняем в storage —
+            # их забирает pipeline через consume_citations() для построения
+            # Блока А «прямые конкуренты».
+            try:
+                cits = self.extract_citations(response.text)
+                if cits:
+                    self._citations[prompt] = cits
+            except Exception:
+                pass
             return self._extract_ai_overview(response.text)
 
     def _extract_ai_overview(self, xml_text: str) -> str:

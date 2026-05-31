@@ -65,9 +65,16 @@ BLACKLIST_DOMAINS = {
     "a1.by", "mts.by", "mts.ru", "life.com.by", "lifeforyou.by",
     "belka.by", "velcom.by", "beltelecom.by", "byfly.by",
     "megafon.ru", "tele2.ru", "beeline.ru", "rostelecom.ru",
-    # Туризм / агрегаторы услуг
+    # Туризм / агрегаторы услуг (отдельные платформы бронирования)
     "tripadvisor.ru", "tripadvisor.com", "booking.com",
     "ostrovok.ru", "tutu.ru", "aviasales.ru",
+    "101hotels.com", "101hotels.ru", "hotels.com",
+    "sutochno.ru", "tvil.ru", "bronevik.com", "otello.ru",
+    "agoda.com", "airbnb.com", "airbnb.ru", "expedia.com",
+    "hotellook.ru", "hotellook.com", "trivago.ru", "trivago.com",
+    "tury.ru", "vse-otely.ru", "tonkosti.ru", "oktogo.ru",
+    "suntime.ru", "level.travel", "travelata.ru", "onlinetours.ru",
+    "tripster.ru", "sputnik8.com", "skyscanner.ru", "kupibilet.ru",
     # Email/портальные сервисы — почтовые ящики у компании не «бренд»
     "mail.ru", "rambler.ru",
     # Конструкторы сайтов и поддомены — это профиль на платформе, не сайт компании
