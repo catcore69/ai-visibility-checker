@@ -10,6 +10,73 @@ from app.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+def normalize_niche(niche: dict[str, Any]) -> dict[str, Any]:
+    """Гарантирует поля primary_category / primary_subcategory /
+    secondary_offerings в niche-словаре.
+
+    Обратная совместимость со старыми отчётами:
+    - Если есть только category/subcategory (старый формат) — primary_*
+      выводятся из них: subcategory.split(",") → primary_subcategory
+      (первая часть) + secondary_offerings (остальные).
+    - Если есть оба формата — primary_* приоритетен, category/subcategory
+      синхронизируются обратно для legacy-кода.
+    """
+    n = dict(niche or {})
+
+    prim_cat = (n.get("primary_category") or "").strip()
+    prim_sub = (n.get("primary_subcategory") or "").strip()
+    sec_off = n.get("secondary_offerings")
+    if not isinstance(sec_off, list):
+        sec_off = []
+    sec_off = [s.strip() for s in sec_off if isinstance(s, str) and s.strip()]
+
+    if not prim_cat or not prim_sub:
+        # Старый формат — выводим primary из category/subcategory.
+        cat = (n.get("category") or "").strip()
+        sub_raw = (n.get("subcategory") or "").strip()
+        parts = [p.strip() for p in sub_raw.split(",") if p.strip()]
+        prim_cat = prim_cat or cat
+        prim_sub = prim_sub or (parts[0] if parts else "")
+        if not sec_off and len(parts) > 1:
+            sec_off = parts[1:]
+
+    n["primary_category"] = prim_cat
+    n["primary_subcategory"] = prim_sub
+    n["secondary_offerings"] = sec_off
+    # Синхронизация обратно для legacy-кода (SERP-запрос, _category_keywords,
+    # которые читают niche.category / niche.subcategory).
+    if not n.get("category"):
+        n["category"] = prim_cat
+    if not n.get("subcategory"):
+        n["subcategory"] = prim_sub
+    return n
+
+
+def primary_category(niche: dict[str, Any]) -> str:
+    return (niche.get("primary_category") or niche.get("category") or "").strip()
+
+
+def primary_subcategory(niche: dict[str, Any]) -> str:
+    """Только ГЛАВНАЯ подкатегория, без secondary. Если в строке есть
+    запятая (старый формат) — берём первую часть."""
+    p = (niche.get("primary_subcategory") or "").strip()
+    if p:
+        return p
+    sub = (niche.get("subcategory") or "").strip()
+    return sub.split(",", 1)[0].strip() if sub else ""
+
+
+def secondary_offerings(niche: dict[str, Any]) -> list[str]:
+    s = niche.get("secondary_offerings")
+    if isinstance(s, list):
+        return [x.strip() for x in s if isinstance(x, str) and x.strip()]
+    # Если есть только subcategory старого формата с запятыми — берём
+    # остальные части как secondary.
+    sub = (niche.get("subcategory") or "").strip()
+    parts = [p.strip() for p in sub.split(",") if p.strip()]
+    return parts[1:] if len(parts) > 1 else []
+
+
 async def detect_niche(
     url: str,
     brand_name: str,
@@ -61,6 +128,9 @@ async def detect_niche(
         niche_data = {
             "category": hint_clean or "Бизнес",
             "subcategory": hint_clean or "Общее",
+            "primary_category": hint_clean or "Бизнес",
+            "primary_subcategory": hint_clean or "Общее",
+            "secondary_offerings": [],
             "business_type": "service",
             "region": region or "unknown",
             "target_audience": "B2C",
@@ -69,6 +139,10 @@ async def detect_niche(
             "is_local": False,
             "typical_user_questions": [],
         }
+
+    # Гарантируем primary_category / primary_subcategory / secondary_offerings
+    # + back-compat (category/subcategory тоже остаются).
+    niche_data = normalize_niche(niche_data)
 
     # Жёстко определённый регион (region_detector) приоритетнее догадки LLM:
     # если он передан — не даём модели его перетереть.

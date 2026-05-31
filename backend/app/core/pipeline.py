@@ -152,6 +152,11 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
 
         if reused and isinstance(reused.niche_data, dict) and reused.competitors:
             niche = dict(reused.niche_data)
+            # ТЗ catcore-nisha-primary-secondary: гарантируем primary_* поля
+            # для старых reuse-отчётов (back-compat). Если их нет — выводим
+            # из старого subcategory.split(",").
+            from app.core.niche_detector import normalize_niche as _norm
+            niche = _norm(niche)
             effective_brand = reused.brand_name or report.brand_name
             effective_region = niche.get("region") or report.region or ""
             competitors = list(reused.competitors)

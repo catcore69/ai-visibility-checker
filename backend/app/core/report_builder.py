@@ -278,7 +278,8 @@ async def build_and_upload_pdf(report, analysis: Analysis, competitors: list[str
     score = report.visibility_score or 0
     niche = report.niche_data or {}
     # MD2: Блок А (прямые из выдачи) + Блок Б (кого ИИ называет в нише, из niche_data).
-    _niche_dict = report.niche_data if isinstance(report.niche_data, dict) else {}
+    from app.core.niche_detector import normalize_niche as _norm_niche
+    _niche_dict = _norm_niche(report.niche_data if isinstance(report.niche_data, dict) else {})
     ai_mentioned_in_niche: list[str] = list(_niche_dict.get("ai_mentioned_in_niche") or [])
     # ТЗ Задача 3: метаданные для Блока Б — «федеральный/республиканский игрок».
     ai_mentioned_meta: dict = dict(_niche_dict.get("ai_mentioned_meta") or {})

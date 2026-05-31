@@ -251,7 +251,8 @@ def build_report_full_payload(report, analysis: Analysis) -> dict[str, Any]:
     brand_name  = report.brand_name
     competitors = list(report.competitors or [])
     # Блок Б: кого ИИ называет в нише — сохранён в niche_data.
-    nd = report.niche_data if isinstance(report.niche_data, dict) else {}
+    from app.core.niche_detector import normalize_niche as _norm_niche
+    nd = _norm_niche(report.niche_data if isinstance(report.niche_data, dict) else {})
     ai_mentioned_in_niche: list[str] = list(nd.get("ai_mentioned_in_niche") or [])
     # ТЗ Задача 3: для каждого имени из Блока Б знаем, федеральный ли он
     # (не в регионе клиента). Помечается «федеральный игрок, не локальный
@@ -315,19 +316,16 @@ def build_report_full_payload(report, analysis: Analysis) -> dict[str, Any]:
     )
     block_b_rows.sort(key=lambda x: (not x["is_client"], -x["score"]))
 
-    # ТЗ catcore-blok-a-iz-realnoy-vydachi: Блок Б показывается ВСЕГДА
-    # (если он не пустой). Это отдельная секция «кого ИИ держит в голове»,
-    # она НЕ конкурирует с Блоком А и должна быть видна всегда — клиент
-    # должен знать, кого ИИ называет в нише, даже если у него есть прямые
-    # региональные конкуренты.
-    # DIRECT_MENTIONS_MIN продолжает влиять на narrative_scenario.
+    # ТЗ catcore-nisha-primary-secondary, Задача 3: Блок Б показывается ВСЕГДА,
+    # даже при accepted=0. Пустой Блок Б — это валидный сигнал «ниша свободна»
+    # (Сценарий 1), а не повод его скрывать.
     DIRECT_MENTIONS_MIN = 3
     non_client_a = [r for r in block_a_rows if not r["is_client"]]
     max_direct_score = max((r["score"] for r in non_client_a), default=0)
     direct_mentions_total = sum(r.get("mentions", 0) for r in block_a_rows)
     has_real_leader = direct_mentions_total >= DIRECT_MENTIONS_MIN
 
-    show_block_b = bool(block_b_rows)
+    show_block_b = True  # всегда показываем секцию (фронт сам выберет — таблица или текст)
 
     # Три сценария для текстового вывода:
     #   scenario_3 — есть РЕАЛЬНЫЙ прямой лидер (≥ DIRECT_MENTIONS_MIN упоминаний);

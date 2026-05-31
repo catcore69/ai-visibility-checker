@@ -365,18 +365,20 @@ export default function ReportPage() {
               </table>
             </div>
 
-            {/* Block B — кого ИИ называет в нише (с пометками федеральных) */}
-            {report.show_block_b && report.block_b_rows && report.block_b_rows.length > 0 && (
-              <div className="mt-8 overflow-x-auto">
-                <h3 className="font-heading text-lg mb-2 text-brand-textBright">
-                  Кого ИИ из вашей ниши уже знает
-                </h3>
-                <p className="text-xs text-brand-muted mb-3">
-                  Бренды, которых сами ИИ-ассистенты называют в ответах на запросы вашей ниши.
-                  Это не обязательно ваши прямые конкуренты — часто это крупные федеральные/международные
-                  игроки или продукты другого типа. Но именно их сейчас слышит ваш потенциальный клиент,
-                  когда спрашивает ИИ.
-                </p>
+            {/* Block B — кого ИИ называет в нише. Показывается ВСЕГДА (даже
+                если accepted=0): пустой Блок Б — это валидный сигнал «ниша
+                свободна», а не повод его скрывать. */}
+            <div className="mt-8 overflow-x-auto">
+              <h3 className="font-heading text-lg mb-2 text-brand-textBright">
+                Кого ИИ из вашей ниши уже знает
+              </h3>
+              <p className="text-xs text-brand-muted mb-3">
+                Бренды, которых сами ИИ-ассистенты называют в ответах на запросы вашей ниши.
+                Это не обязательно ваши прямые конкуренты — часто это крупные федеральные/международные
+                игроки или продукты другого типа. Но именно их сейчас слышит ваш потенциальный клиент,
+                когда спрашивает ИИ.
+              </p>
+              {report.block_b_rows && report.block_b_rows.filter((r) => !r.is_client).length > 0 ? (
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-brand-border">
@@ -411,8 +413,19 @@ export default function ReportPage() {
                     ))}
                   </tbody>
                 </table>
-              </div>
-            )}
+              ) : (
+                <div className="rounded-lg border border-brand-border/60 bg-brand-elevated/20 p-5 text-sm text-brand-text leading-relaxed">
+                  <p>
+                    <strong>ИИ пока не называет конкретных игроков в вашей нише</strong>
+                    {report.niche ? ` «${report.niche}»` : ''}.
+                    Это значит, что ниша в ответах ИИ <strong>свободна</strong> —
+                    никто ещё не закрепился. Через год сделать то же самое будет в разы
+                    дороже: у конкурентов появится история упоминаний, и перебивать её
+                    придётся объёмом.
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
         </section>
 

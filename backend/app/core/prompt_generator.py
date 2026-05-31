@@ -43,8 +43,14 @@ def _slugify(text: str) -> str:
 
 
 def _niche_key(niche: dict[str, Any]) -> str:
-    category = _slugify(niche.get("category", ""))
-    subcategory = _slugify(niche.get("subcategory", ""))
+    """ТЗ catcore-nisha-primary-secondary: niche_key строится из PRIMARY
+    категории и подкатегории. Secondary НЕ включаем — иначе кеш дробится
+    по доп.услугам, и две базы отдыха в одном регионе попадают в разные
+    niche_key'и из-за того, что у одной «+рыбалка», у другой «+баня».
+    """
+    from app.core.niche_detector import primary_category, primary_subcategory
+    category = _slugify(primary_category(niche))
+    subcategory = _slugify(primary_subcategory(niche))
     region = _slugify(niche.get("region", ""))
     audience = _slugify(niche.get("target_audience", ""))
     return f"{category}|{subcategory}|{region}|{audience}"
@@ -159,21 +165,29 @@ def _city_from_region(region: str) -> str:
 
 
 def _build_query_seeds(niche: dict[str, Any]) -> list[str]:
-    """Сиды для автоподсказок. Приоритет: subcategory (узкая ниша) → category
-    (общая). Раньше брали только category, и магазин аккумуляторов
-    (subcategory=«Аккумуляторы для транспорта», category=«Автоаксессуары»)
-    получал подсказки про автоаксессуары (мимо темы). Subcategory всегда
-    конкретнее — у живых suggest-движков она даёт релевантные подсказки.
+    """Сиды для автоподсказок.
+
+    ТЗ catcore-nisha-primary-secondary:
+    - primary_category/primary_subcategory → ОСНОВНЫЕ сиды (определяют конкурентов).
+    - secondary_offerings → ДОПОЛНИТЕЛЬНЫЕ сиды для обогащения охвата запросов
+      («база отдыха с рыбалкой Хабаровск», «база отдыха с баней Хабаровск»).
+      Конкурентов с secondary-сидов мы НЕ берём.
     """
-    cat = (niche.get("category") or "").strip()
-    sub = (niche.get("subcategory") or "").strip()
+    from app.core.niche_detector import (
+        primary_category,
+        primary_subcategory,
+        secondary_offerings,
+    )
+    p_cat = primary_category(niche)
+    p_sub = primary_subcategory(niche)
+    p_sec = secondary_offerings(niche)
     region = (niche.get("region") or "").strip()
     city = (niche.get("city") or "").strip() or _city_from_region(region)
     country_part = region.split(",")[-1].strip() if "," in region else ""
 
-    # Базовая узкая ниша = subcategory если есть, иначе category.
-    primary = sub or cat
-    secondary = cat if sub else ""
+    # Базовая узкая ниша = primary_subcategory если есть, иначе primary_category.
+    primary = p_sub or p_cat
+    secondary = p_cat if p_sub else ""
 
     # «Аккумуляторы и аксессуары» / «Бухгалтерские услуги» — на такие
     # многословные сиды suggest вернёт мало. Делаем ещё КОРОТКИЕ сиды
@@ -204,6 +218,17 @@ def _build_query_seeds(niche: dict[str, Any]) -> list[str]:
     if secondary and secondary.lower() != primary.lower():
         if city:
             seeds.append(f"{secondary} {city}")
+    # ТЗ: secondary_offerings — обогащение охвата запросов:
+    # «база отдыха с рыбалкой Хабаровск», «база отдыха с баней Хабаровск».
+    # Конкурентов с этих сидов не берём (это просто запросы для polling).
+    for sec in p_sec[:4]:
+        sec = sec.strip()
+        if not sec or sec.lower() == primary.lower():
+            continue
+        if primary and city:
+            seeds.append(f"{primary} с {sec} {city}")
+        elif primary:
+            seeds.append(f"{primary} с {sec}")
 
     # Дедуп с сохранением порядка
     seen: set[str] = set()
