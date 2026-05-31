@@ -50,26 +50,39 @@ class GoogleAIOverviewPoller(BasePoller):
             if is_by
             else self.config.XMLRIVER_GOOGLE_COUNTRY_RU
         )
+        # ФИКС 31.05.26 по подсказке поддержки XMLRiver: loc должен быть кодом
+        # ГОРОДА (Criteria ID из geo.csv Google Ads), а не страны.
+        # Раньше шли loc=country=2643/2112 → error 15 «нет результатов»
+        # на всех русских запросах. Контрольный US-запрос (country=2840+
+        # loc=2840) работал, потому что для США 2840 одновременно валиден
+        # как country и как loc в их справочнике, но для РФ/БР loc=страна
+        # не валиден.
+        loc = (
+            self.config.XMLRIVER_GOOGLE_LOC_BY
+            if is_by
+            else self.config.XMLRIVER_GOOGLE_LOC_RU
+        )
         # Правильный эндпоинт по проверенному рабочему запросу пользователя —
         # /search/xml (это и есть Google + AI Overview); /search_google/xml
         # возвращал пустоту с тем же ключом. country оставляем для региональности.
         url = "https://xmlriver.com/search/xml"
-        # КРИТИЧНЫЙ ФИКС (31.05.26): без loc XMLRiver на любой country отвечает
-        # error 104 «Неверный параметр loc». Подтверждено curl-ом:
-        # country=2643/2112 без loc → 100% error 104 (то есть AI Overview
-        # никогда не приходил с момента подключения). С loc=country запрос
-        # проходит, и на запросах, где Google показывает AI Overview, приходит
-        # <ai><answer>base64(html)</answer></ai>. Контрольный US-запрос
-        # «best electric car 2026» с country=2840+loc=2840 вернул блок 333KB.
-        # Коды: те же Google geo IDs (2643=Russia, 2112=Belarus, 2840=USA).
+        # КРИТИЧНЫЕ ФИКСЫ (31.05.26, после консультации с поддержкой XMLRiver
+        # и чтения api-about):
+        # 1) loc=код города (Criteria ID из geo.csv Google Ads), не страны.
+        #    Подтверждено поддержкой («loc — конкретный город или хотя бы регион»).
+        #    Раньше шли loc=country → error 15 «нет результатов» на всех русских.
+        # 2) ai=1 — отдельный платный параметр для парсинга «Обзора от ИИ» Google.
+        #    Без него блок <ai><answer> в ответ не подмешивается, даже если
+        #    Google показал AI Overview. Симметричен neuro=1 у Yandex-эндпоинта.
+        #    Источник: https://xmlriver.com/apidoc/api-about/
+        # 3) groupby не передаём — конфликтует с настройками кабинета.
         params = {
             "user": self.config.XMLRIVER_USER,
             "key": self.config.XMLRIVER_KEY,
             "query": prompt,
             "country": country,
-            "loc": country,
-            # groupby убран: тоже требует loc, конфликтует с настройками кабинета.
-            # По умолчанию вернётся топ-10 результатов.
+            "loc": loc,
+            "ai": "1",
         }
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(url, params=params)
