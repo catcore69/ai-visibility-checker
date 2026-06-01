@@ -188,33 +188,55 @@ def _extract_signals(url: str, text: str) -> list[tuple[str, str, int, Optional[
     if "₴" in text or "грн" in low or "гривен" in low:
         signals.append(("currency", "Украина", W_CURRENCY, None))
 
-    # 5. Города — ТЗ catcore-5-globalnyh-fiksov Фикс 5: word-boundary match
-    # + приоритет длинного совпадения. Раньше «хабаровск» (короткий ключ)
-    # как substring сматчился во всех словоформах «хабаровск**ом**»,
-    # «хабаровск**ого**», накапливая больше голосов, чем явный «хабаровский
-    # край». Теперь:
-    #   - матч только на границе слова (\b), словоформы тоже считаются
-    #     одним вхождением, не подстрокой каждой буквы;
-    #   - сортируем ключи от длинных к коротким, и если длинный ключ
-    #     («хабаровский край») найден — короткий («хабаровск») в той же
-    #     позиции уже не голосует (исключаем double-count).
-    text_lower = low
-    sorted_keys = sorted(CITY_COUNTRY.keys(), key=len, reverse=True)
-    consumed_spans: list[tuple[int, int]] = []  # позиции, уже занятые длинным ключом
+    # 5. Города — ТЗ catcore-5-globalnyh-fiksov Фикс 5 v2: stem-match
+    # для русских словоформ + приоритет длинного.
+    #
+    # Корень: ключи в CITY_COUNTRY в именительном падеже («хабаровск»,
+    # «хабаровский край»). В тексте они почти всегда в других формах:
+    # «в Хабаровск-ом кра-е». Простой `\bхабаровский край\w*` не сматчит
+    # из-за словоформы «хабаровск**ом**».
+    #
+    # Решение: каждое слово ключа превращается в стем (первые N букв,
+    # 5–6) + `\w*` хвост → сматчит любую словоформу. «хабаровский край»
+    # → паттерн `\bхабаровск\w* кра\w*` ловит «Хабаровском крае».
+    #
+    # Сортировка по числу слов в ключе (DESC) + по длине → составные
+    # ключи побеждают одиночные. consumed_spans защищает от double-count.
+    def _stem(word: str, default_len: int = 6) -> str:
+        """Безопасный стем: для коротких слов (<5 букв) — слово целиком."""
+        if len(word) <= 4:
+            return re.escape(word)
+        # Для русских словоформ 5–6 первых букв обычно общая основа.
+        # Не используем эвристику окончаний, чтобы не сломать иностранные.
+        return re.escape(word[:default_len])
+
+    def _build_pattern(key: str) -> re.Pattern:
+        # Каждое слово → стем + \w* (любая словоформа).
+        # Слова склеиваются через `\s+` (на случай двойных пробелов).
+        words = key.split()
+        parts = [_stem(w) + r"\w*" for w in words]
+        return re.compile(r"\b" + r"\s+".join(parts), re.UNICODE)
+
+    # Сортировка: сначала ключи с большим числом слов (составные), внутри —
+    # по длине строки. «хабаровский край» (2 слова) > «хабаровск» (1).
+    sorted_keys = sorted(
+        CITY_COUNTRY.keys(),
+        key=lambda k: (len(k.split()), len(k)),
+        reverse=True,
+    )
+    consumed_spans: list[tuple[int, int]] = []
     for city_key in sorted_keys:
-        # Граница: \b у пробела/начала строки. Используем re.IGNORECASE,
-        # хотя text_lower уже lower — для надёжности на нестандартных
-        # символах кириллицы (ё/е, и/й и т.п. в формах ключей).
-        pat = re.compile(r"\b" + re.escape(city_key) + r"\w*", re.UNICODE)
-        for m in pat.finditer(text_lower):
+        try:
+            pat = _build_pattern(city_key)
+        except re.error:
+            continue
+        for m in pat.finditer(low):
             span = (m.start(), m.end())
-            # Если этот фрагмент уже «съел» более длинный ключ — пропускаем.
+            # Защита от double-count: если этот span уже накрыт более длинным.
             if any(s[0] <= span[0] < s[1] for s in consumed_spans):
                 continue
             consumed_spans.append(span)
             country = CITY_COUNTRY[city_key]
-            # Восстанавливаем читабельное имя (первая буква + остальное
-            # как в ключе; для составных «хабаровский край» — каждое слово).
             display = " ".join(w.capitalize() for w in city_key.split())
             signals.append(("city", country, W_CITY, display))
 
