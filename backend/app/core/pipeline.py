@@ -272,7 +272,25 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
 
         # ===== ШАГ 4: Промпты =====
         await update_report_status(db, report_id, "prompt_generation", progress=25)
-        prompts = await generate_prompts(niche, count=settings.PROMPTS_PER_REPORT)
+        # Стоп-лист брендов из карточек бизнеса (только LOCAL): имена соседних
+        # заведений-конкурентов, чтобы навигационные запросы вроде «база отдыха
+        # белое озеро» не попали в опрос (разбор 800b4eca). Карточки — точный
+        # источник этих имён собственных.
+        query_exclude_names: list[str] = []
+        try:
+            from app.core.niche_detector import business_scope as _bscope
+            if _bscope(niche) == "local":
+                from app.core.competitor_finder import fetch_card_competitor_names
+                query_exclude_names = await fetch_card_competitor_names(
+                    niche, brand_name=report.brand_name
+                )
+                logger.info("query_stoplist_built", count=len(query_exclude_names))
+        except Exception as exc:
+            logger.warning("query_stoplist_failed", error=str(exc))
+        prompts = await generate_prompts(
+            niche, count=settings.PROMPTS_PER_REPORT,
+            exclude_names=query_exclude_names,
+        )
         await update_report_field(db, report_id, prompts=prompts)
 
         # ===== ШАГ 5: ПАРАЛЛЕЛЬНО — Блок А (SERP-конкуренты) И опрос моделей =====

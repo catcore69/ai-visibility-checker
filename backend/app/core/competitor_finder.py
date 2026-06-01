@@ -143,6 +143,34 @@ def _is_info_resource(host: str) -> bool:
     return False
 
 
+# Порог детектора каталога/агрегатора по числу разных городов в тексте сайта.
+# Одна локальная компания привязана к 1-2 городам (свой город + иногда край/
+# соседний). Каталог (domik.travel, 101hotels, агрегатор бухгалтерий) листит
+# десятки. 5 — безопасный зазор: реальный бизнес почти никогда не упоминает
+# 5 РАЗНЫХ городов из газеттира, а каталог — всегда.
+_CATALOG_CITY_THRESHOLD = 5
+
+
+def _looks_like_catalog(text: str) -> bool:
+    """True, если сайт по контенту — каталог/агрегатор (покрывает много
+    городов), а не одна компания-конкурент.
+
+    Корневая причина бага 800b4eca: domik.travel прошёл и блэклист (его там
+    нет), и класс-фильтр `_is_info_resource` (в хосте нет booking/katalog/...),
+    и категория-фильтр (на листинге сотен баз слово «отдых» встречается
+    десятки раз). Отличить от одной базы можно по охвату городов. Сигнал
+    нишево-независимый: одинаково ловит каталоги баз отдыха, бухгалтерий и
+    магазинов аккумуляторов.
+    """
+    if not text:
+        return False
+    try:
+        from app.core.region_detector import count_distinct_cities
+        return count_distinct_cities(text) >= _CATALOG_CITY_THRESHOLD
+    except Exception:
+        return False
+
+
 async def find_competitor_url(name: str, region: str = "Россия") -> Optional[str]:
     """Ищет официальный сайт конкурента через XMLRiver SERP.
 
@@ -742,6 +770,7 @@ async def _find_competitors_via_serp(
     rej_wrong_country = 0
     rej_no_real_site = 0
     rej_generic = 0
+    rej_catalog = 0
     for u, summ in zip(real_urls, summaries):
         if not isinstance(summ, dict):
             continue
@@ -753,6 +782,12 @@ async def _find_competitors_via_serp(
         # и наш, но имя метаданных мусорное — оставляем кандидата с доменом-меткой,
         # а не теряем реального конкурента (buhvitebsk.by — реальная фирма).
 
+        # 0. Каталог/агрегатор (покрывает много городов) — НЕ конкурент.
+        # Ловит domik.travel/101hotels, которых нет ни в блэклисте, ни в
+        # класс-фильтре по хосту, но которые проходят категорию (листинг).
+        if _looks_like_catalog(text):
+            rej_catalog += 1
+            continue
         # 1. Регион сайта = регион клиента (TLD + сигналы текста).
         if client_country:
             site_country = country_from_site(u, text)
@@ -805,6 +840,7 @@ async def _find_competitors_via_serp(
         rej_generic=rej_generic,
         rej_wrong_country=rej_wrong_country,
         rej_off_topic=rej_off_topic,
+        rej_catalog=rej_catalog,
         keywords=keywords,
         client_country=client_country,
     )
@@ -1107,6 +1143,10 @@ async def _find_competitors_from_cards(
         # Регион + категория проверяем ТОЛЬКО если есть сайт с текстом.
         # Если сайта нет — доверяем карточке (Google local pack гео+ниша).
         if url and isinstance(summ, dict) and text:
+            # Каталог/агрегатор (много городов) — не отдельный конкурент.
+            if _looks_like_catalog(text):
+                rej_off_topic += 1
+                continue
             if client_country:
                 site_country = country_from_site(url, text)
                 if site_country and site_country != client_country:
@@ -1139,6 +1179,64 @@ async def _find_competitors_from_cards(
         rej_off_topic=rej_off_topic,
         rej_wrong_country=rej_wrong_country,
     )
+    return out
+
+
+async def fetch_card_competitor_names(
+    niche: dict[str, Any],
+    brand_name: str = "",
+    max_names: int = 12,
+) -> list[str]:
+    """Лёгкий список ИМЁН конкурентов из карточек бизнеса Google —
+    для стоп-листа брендов в запросах (ТЗ-разбор 800b4eca: «база отдыха
+    белое озеро», «турбаза узала» — навигация к конкретному заведению,
+    не запрос ниши). В отличие от `_find_competitors_from_cards` НЕ заходит
+    на сайты (не нужен аудит региона/категории), берём только чистые title.
+
+    Карточки — точный источник имён собственных локальных игроков той же
+    ниши/региона. Вызывается в пайплайне ДО отбора запросов; имена идут
+    селектору как exclude + детерминированно вырезают запросы с ними.
+    Механика общая для любой LOCAL-ниши.
+    """
+    from app.core.site_analyzer import (
+        looks_generic_name,
+        is_placeholder_name,
+        looks_like_slogan,
+    )
+    from app.core.niche_detector import primary_category
+
+    region = niche.get("region", "")
+    city = _city_from_region(region) or region
+    p_cat = primary_category(niche)
+    card_query = " ".join(p for p in [p_cat, city] if p).strip()
+    if not card_query:
+        return []
+    try:
+        cards = await _fetch_business_cards(card_query, num=20)
+    except Exception as exc:
+        logger.warning("card_names_fetch_failed", error=str(exc))
+        return []
+
+    brand_lc = (brand_name or "").lower()
+    out: list[str] = []
+    seen: set[str] = set()
+    for c in cards or []:
+        t = (c.get("title") or "").strip()
+        tl = t.lower()
+        if not t or tl in seen or tl == brand_lc:
+            continue
+        if (
+            looks_generic_name(t)
+            or is_placeholder_name(t)
+            or looks_like_slogan(t)
+            or _starts_with_legal_form(t)
+        ):
+            continue
+        seen.add(tl)
+        out.append(t)
+        if len(out) >= max_names:
+            break
+    logger.info("card_names_for_query_stoplist", query=card_query, names=len(out))
     return out
 
 
@@ -1223,6 +1321,10 @@ async def _find_competitors_from_ai_citations(
             if not site_country or site_country != client_country:
                 rej_wrong_country += 1
                 continue
+        # Каталог/агрегатор (много городов) — не отдельный конкурент.
+        if _looks_like_catalog(text):
+            rej_off_topic += 1
+            continue
         # Категория ≥2 вхождений стемов (как и SERP-органика Блока А).
         if not _site_matches_category(text, keywords, min_total=2):
             rej_off_topic += 1
@@ -1339,6 +1441,10 @@ async def _find_competitors_from_ai_responses(
             if site_country and site_country != client_country:
                 rej_wrong_country += 1
                 continue
+        # Каталог/агрегатор (много городов) — не отдельный конкурент.
+        if _looks_like_catalog(text):
+            rej_off_topic += 1
+            continue
         # 2. Категория — строго ≥2 повторений стемов (как в Блоке А SERP).
         if not _site_matches_category(text, keywords, min_total=2):
             rej_off_topic += 1
@@ -1670,6 +1776,10 @@ async def extract_ai_mentioned_in_niche(
             rej_other_country += 1
             continue
 
+        # Каталог/агрегатор (много городов) — не игрок ниши.
+        if _looks_like_catalog(text):
+            rej_off_topic += 1
+            continue
         # Категория Block Б: строгий ≥2 вхождения стема (равно Блоку А).
         if not _site_matches_category(text, keywords, min_total=2):
             rej_off_topic += 1
