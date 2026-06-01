@@ -200,34 +200,44 @@ def _build_query_seeds(niche: dict[str, Any]) -> list[str]:
             if t and t not in STOP and len(t) >= 5:
                 primary_keywords.append(t)
 
+    # ТЗ catcore-5-globalnyh-fiksov Фикс 2 (Слой 1): для локального бизнеса
+    # ВСЕ сиды строятся с гео-привязкой. Голые сиды без региона тянут
+    # подсказки топ-рынка по слову (Google Suggest «агроусадьба» → БР-
+    # агроусадьбы Павлова/Натюрлих, потому что в БР это массовый рынок).
+    # Голый сид допускается только если регион unknown (нелокальный бизнес).
+    is_local = bool(niche.get("is_local", True))
+    has_geo = bool(city or (country_part and country_part.lower() not in ("", "рф", "рб")))
+    geo_tail = city or country_part  # что добавлять к каждому сиду
+
     seeds: list[str] = []
-    # Полная фраза primary — для точного контекста
     if primary:
-        if city:
-            seeds.append(f"{primary} {city}")
-        seeds.append(primary)
-    # Каждое ключевое слово отдельно — для объёма подсказок
+        if geo_tail:
+            seeds.append(f"{primary} {geo_tail}")
+        # Голый сид primary — только если гео нет (нелокальный бизнес).
+        if not is_local or not has_geo:
+            seeds.append(primary)
+    # Ключевые слова primary — обязательно с гео для локального бизнеса.
     for kw in primary_keywords:
-        if city:
-            seeds.append(f"{kw} {city}")
-        seeds.append(kw)
-    # Country-level расширение
-    if primary and country_part and country_part.lower() not in ("", "рф", "рб"):
-        seeds.append(f"{primary} {country_part}")
-    # category для расширения, если есть отличие
+        if geo_tail:
+            seeds.append(f"{kw} {geo_tail}")
+        if not is_local or not has_geo:
+            seeds.append(kw)
+    # category-расширение тоже только с гео для local.
     if secondary and secondary.lower() != primary.lower():
-        if city:
-            seeds.append(f"{secondary} {city}")
+        if geo_tail:
+            seeds.append(f"{secondary} {geo_tail}")
+        if not is_local or not has_geo:
+            seeds.append(secondary)
     # ТЗ: secondary_offerings — обогащение охвата запросов:
     # «база отдыха с рыбалкой Хабаровск», «база отдыха с баней Хабаровск».
-    # Конкурентов с этих сидов не берём (это просто запросы для polling).
+    # Тоже только с гео для локального.
     for sec in p_sec[:4]:
         sec = sec.strip()
         if not sec or sec.lower() == primary.lower():
             continue
-        if primary and city:
-            seeds.append(f"{primary} с {sec} {city}")
-        elif primary:
+        if primary and geo_tail:
+            seeds.append(f"{primary} с {sec} {geo_tail}")
+        elif primary and not is_local:
             seeds.append(f"{primary} с {sec}")
 
     # Дедуп с сохранением порядка

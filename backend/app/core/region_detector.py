@@ -188,11 +188,35 @@ def _extract_signals(url: str, text: str) -> list[tuple[str, str, int, Optional[
     if "₴" in text or "грн" in low or "гривен" in low:
         signals.append(("currency", "Украина", W_CURRENCY, None))
 
-    # 5. Города
-    for city_key, country in CITY_COUNTRY.items():
-        if city_key in low:
-            # Восстанавливаем «красивое» имя города из ключа (первая буква вверх)
-            signals.append(("city", country, W_CITY, city_key.capitalize()))
+    # 5. Города — ТЗ catcore-5-globalnyh-fiksov Фикс 5: word-boundary match
+    # + приоритет длинного совпадения. Раньше «хабаровск» (короткий ключ)
+    # как substring сматчился во всех словоформах «хабаровск**ом**»,
+    # «хабаровск**ого**», накапливая больше голосов, чем явный «хабаровский
+    # край». Теперь:
+    #   - матч только на границе слова (\b), словоформы тоже считаются
+    #     одним вхождением, не подстрокой каждой буквы;
+    #   - сортируем ключи от длинных к коротким, и если длинный ключ
+    #     («хабаровский край») найден — короткий («хабаровск») в той же
+    #     позиции уже не голосует (исключаем double-count).
+    text_lower = low
+    sorted_keys = sorted(CITY_COUNTRY.keys(), key=len, reverse=True)
+    consumed_spans: list[tuple[int, int]] = []  # позиции, уже занятые длинным ключом
+    for city_key in sorted_keys:
+        # Граница: \b у пробела/начала строки. Используем re.IGNORECASE,
+        # хотя text_lower уже lower — для надёжности на нестандартных
+        # символах кириллицы (ё/е, и/й и т.п. в формах ключей).
+        pat = re.compile(r"\b" + re.escape(city_key) + r"\w*", re.UNICODE)
+        for m in pat.finditer(text_lower):
+            span = (m.start(), m.end())
+            # Если этот фрагмент уже «съел» более длинный ключ — пропускаем.
+            if any(s[0] <= span[0] < s[1] for s in consumed_spans):
+                continue
+            consumed_spans.append(span)
+            country = CITY_COUNTRY[city_key]
+            # Восстанавливаем читабельное имя (первая буква + остальное
+            # как в ключе; для составных «хабаровский край» — каждое слово).
+            display = " ".join(w.capitalize() for w in city_key.split())
+            signals.append(("city", country, W_CITY, display))
 
     return signals
 

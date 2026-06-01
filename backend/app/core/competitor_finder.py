@@ -660,21 +660,27 @@ async def _find_competitors_via_serp(
 
 
 def _category_keywords(niche: dict[str, Any]) -> list[str]:
-    """ТЗ catcore-nisha-primary-secondary: стемы из PRIMARY категории и
-    подкатегории. Secondary НЕ участвуют — иначе категория-фильтр становится
-    расплывчатым: «агроусадьба + рыболовные туры» пускал в Block A
-    рыболовные порталы вместо баз отдыха.
+    """ТЗ catcore-5-globalnyh-fiksov Фикс 1: стемы категория-фильтра.
 
-    Реальный профильный сайт повторяет primary-стемы много раз
-    (≥2 для Block A — _site_matches_category min_total=2).
+    Источник стемов — primary_category + primary_subcategory (не secondary).
+    Стоп-лист — _CATEGORY_STEM_STOPS (служебные/гео/общие шапки), а НЕ
+    _GENERIC_WORDS / _GENERIC_NAME_WORDS. Иначе для ниши «база отдыха»
+    оба слова попадают в стоп → стемы пустые → фильтр пропускает всё.
+
+    Слова САМОЙ ниши («база», «отдыха», «бухгалтерия», «аккумуляторы»)
+    обязаны попадать в стемы — именно по ним сайт-кандидат подтверждает,
+    что он про эту нишу.
     """
-    from app.core.site_analyzer import _GENERIC_WORDS
+    from app.core.site_analyzer import _CATEGORY_STEM_STOPS
     from app.core.niche_detector import primary_category, primary_subcategory
     p_cat = primary_category(niche)
     p_sub = primary_subcategory(niche)
     raw = " ".join([p_cat, p_sub]).lower()
     tokens = [t.strip("«»\"'.,()-—:;") for t in raw.split() if t]
-    distinctive = [t for t in tokens if t and t not in _GENERIC_WORDS and len(t) >= 5]
+    distinctive = [
+        t for t in tokens
+        if t and t not in _CATEGORY_STEM_STOPS and len(t) >= 5
+    ]
     # стем = первые 6 символов (грубо, но для русского работает).
     return list({t[:6] for t in distinctive})
 
@@ -684,12 +690,17 @@ def _site_matches_category(text: str, keywords: list[str], min_total: int = 2) -
 
     Итерация-3: одного вхождения мало — «Юрист для людей» иногда упоминает
     «бухгалтерские услуги» в списке смежных услуг, но это не бухгалтерская
-    фирма. Требуем СУММУ вхождений всех стемов категории ≥ min_total —
-    реальный профильный сайт повторяет ключевые слова много раз, случайное
-    упоминание это не пройдёт.
+    фирма. Требуем СУММУ вхождений всех стемов категории ≥ min_total.
+
+    ТЗ catcore-5-globalnyh-fiksov Фикс 1: пустой keywords БОЛЬШЕ НЕ
+    пропускает всё подряд (раньше `return True` создавал дыру —
+    «Московский Комсомолец» в Block A магазина АКБ). Если категория не
+    смогла собраться в стемы — это ошибка построения ниши, лучше
+    показать меньше конкурентов, чем пропустить мусор.
     """
     if not keywords:
-        return True
+        logger.warning("category_filter_empty_keywords_reject_all")
+        return False
     if not text:
         return False
     t = text.lower()
@@ -1228,26 +1239,41 @@ async def extract_ai_mentioned_in_niche(
         text = summ.get("text") or ""
         site_name = (summ.get("org_name") or "").strip()
 
-        # Регион сайта. Возможные значения:
-        #   "" — TLD/контент не дали сигнала (международный домен .com, .org).
-        #        Это глобальные бренды-производители (Bosch, Varta) — оставляем,
-        #        ИИ называет их в контексте ниши, у клиента может быть как
-        #        перепродажа этих брендов.
-        #   == client_country — сайт в регионе клиента, пропускаем.
-        #   != client_country (конкретно другая страна) — региональный магазин
-        #        из другой страны. Для клиента это не «контекст ниши», это
-        #        просто чужой рынок. ОТСЕИВАЕМ.
+        # ТЗ catcore-5-globalnyh-fiksov Фикс 4: Block Б не отсеивает по
+        # региону, а ПОМЕЧАЕТ:
+        #   - site_country == "" (международный .com/.org) → пометка «федерал»
+        #   - site_country != client_country → пометка «федерал/международный»
+        #   - site_country == client_country, но site_city != client_city
+        #       (другой регион внутри страны) → пометка «из другого региона»
+        #   - site_country == client_country, site_city == client_city →
+        #       без пометки (локальный игрок)
+        # Это валидный инсайт: «ИИ в вашей нише знает в основном неместные базы»
+        # = «локально ниша свободна» (Сценарий 1).
         site_country = country_from_site(u, text) if client_country else ""
-        if client_country and site_country and site_country != client_country:
-            rej_other_country += 1
-            continue
 
-        # is_player_in_other_market используется для бейджа в UI:
-        # сайт без явной страны (Bosch.com) → True, помечается «федеральный/
-        # республиканский игрок». Сайт в стране клиента → False, обычная строка.
+        # Определяем «другой регион внутри страны»:
+        # Если у клиента есть конкретный город (region = «Город, Страна») И
+        # site_country совпадает со страной клиента — проверяем, упоминается
+        # ли client_city на сайте конкурента. Нет упоминания → другой регион.
+        client_city = ""
+        if client_country and region and "," in region:
+            client_city = region.split(",")[0].strip().lower()
+        is_other_region_same_country = False
+        if (
+            client_city
+            and site_country
+            and site_country == client_country
+            and client_city not in (text or "").lower()
+        ):
+            is_other_region_same_country = True
+
+        # is_player_in_other_market = True, если сайт НЕ подтверждён как
+        # локальный (другая страна, нет страны, или другой регион внутри
+        # страны). Используется как бейдж в UI.
         is_player_in_other_market = (
             not site_country
             or (client_country and site_country != client_country)
+            or is_other_region_same_country
         )
         # Категория Block Б: строгий ≥2 вхождения стема (равно Блоку А).
         if not _site_matches_category(text, keywords, min_total=2):
@@ -1281,10 +1307,13 @@ async def extract_ai_mentioned_in_niche(
         out.append(name)
         meta[nl] = {
             "is_other_market": is_player_in_other_market,
+            "is_other_region": is_other_region_same_country,
             "site_country": site_country or "",
         }
         if is_player_in_other_market:
             federal_count += 1
+        if is_other_region_same_country:
+            rej_other_country += 1  # переиспользуем счётчик для логирования
         if len(out) >= count:
             break
 
@@ -1295,7 +1324,7 @@ async def extract_ai_mentioned_in_niche(
         accepted=len(out),
         other_market_players=federal_count,
         rej_off_topic=rej_off_topic,
-        rej_other_country=rej_other_country,
+        other_region_within_country=rej_other_country,
         rej_generic=rej_generic,
     )
     return out, meta

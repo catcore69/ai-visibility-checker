@@ -293,20 +293,35 @@ def build_report_full_payload(report, analysis: Analysis) -> dict[str, Any]:
     # «федеральный игрок» (это маркер крупного игрока без местной привязки).
     client_region_str = (getattr(report, "region", "") or "")
     is_client_belarus = "беларус" in client_region_str.lower()
-    other_market_label = (
+    cross_country_label = (
         "республиканский игрок, не локальный конкурент"
         if is_client_belarus
         else "федеральный игрок, не локальный конкурент"
     )
+    other_region_label = "из другого региона, не локальный конкурент"
+
+    def _label_for(m: dict) -> str:
+        if not m:
+            return ""
+        # Другой регион внутри той же страны
+        if m.get("is_other_region"):
+            return other_region_label
+        # Другая страна или международный домен без явной страны
+        if m.get("is_other_market"):
+            return cross_country_label
+        return ""
+
     def _block_b_row(b: str) -> dict:
         r = _brand_row(b)
         if not r["is_client"]:
             m = ai_mentioned_meta.get(b.lower()) or {}
             r["is_other_market"] = bool(m.get("is_other_market"))
+            r["is_other_region"] = bool(m.get("is_other_region"))
             r["site_country"] = m.get("site_country") or ""
-            r["other_market_label"] = other_market_label if r["is_other_market"] else ""
+            r["other_market_label"] = _label_for(m)
         else:
             r["is_other_market"] = False
+            r["is_other_region"] = False
             r["site_country"] = ""
             r["other_market_label"] = ""
         return r
