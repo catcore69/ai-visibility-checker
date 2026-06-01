@@ -171,6 +171,55 @@ def _looks_like_catalog(text: str) -> bool:
         return False
 
 
+# Слова-суффиксы региона: общие, по ним нельзя матчить (иначе «Приморский
+# край» совпадёт с «Хабаровский край» по слову «край»).
+_REGION_GENERIC_PREFIXES = (
+    "кра", "обл", "респ", "город", "горо", "райо", "окру", "посёл", "посел",
+    "дерев", "село", "сел",
+)
+
+
+def _region_name_stems(s: str) -> set[str]:
+    """Стемы ИМЕНИ региона/города без общих суффиксов (край/область/...).
+    «Хабаровский край» → {'хабаро'}; «Витебск» → {'витебс'}."""
+    out: set[str] = set()
+    for w in re.findall(r"\w+", (s or "").lower()):
+        if len(w) < 4:
+            continue
+        if any(w.startswith(p) for p in _REGION_GENERIC_PREFIXES):
+            continue
+        out.add(w[:6])
+    return out
+
+
+def _site_in_client_region(url: str, text: str, client_region: str) -> bool:
+    """ТЗ-разбор 800b4eca, пункт 1: для LOCAL-добора (SERP + citations) сайт
+    конкурента должен подтверждать РЕГИОН клиента, не только страну.
+
+    Федеральные агрегаторы (tutu.ru, zagorodvse.ru) город клиента не
+    подтверждают → отсекаются. Локальная фирма подтверждает — названием города
+    в тексте ИЛИ местным телефонным кодом (+7 4212 Хабаровск, +375 21 Витебск).
+    Сигнал общий: одинаково отделяет локалов от федералов в любом регионе.
+
+    Карточки бизнеса через этот гейт НЕ проходят (там гео уже подтверждено
+    Google local pack), он только для добора SERP/citations.
+    """
+    client_stems = _region_name_stems(_city_from_region(client_region) or client_region)
+    if not client_stems:
+        return True  # регион клиента неизвестен — не режем
+    try:
+        from app.core.region_detector import detect_region_sync
+        info = detect_region_sync(url, text)
+    except Exception:
+        return False
+    site_city = info.get("city") or ""
+    if not site_city:
+        # Сайт не подтверждает НИ ОДНОГО города — для строгого LOCAL-добора
+        # это недостаточно (федеральный агрегатор/онлайн-витрина). Отклоняем.
+        return False
+    return bool(client_stems & _region_name_stems(site_city))
+
+
 async def find_competitor_url(name: str, region: str = "Россия") -> Optional[str]:
     """Ищет официальный сайт конкурента через XMLRiver SERP.
 
@@ -651,6 +700,7 @@ async def _find_competitors_via_serp(
     niche: dict[str, Any],
     exclude: list[str],
     count: int = 5,
+    require_region: bool = False,
 ) -> list[str]:
     """Итерация-3, Задача 1.2/4: конкуренты из РЕАЛЬНОЙ выдачи.
 
@@ -682,18 +732,23 @@ async def _find_competitors_via_serp(
                 words.append(w)
         return " ".join(words)
 
-    def _first_keyword(phrase: str) -> str:
-        """Первое значимое слово (≥5 букв) — для SERP-fallback при пустом
-        результате по полной фразе. XMLRiver на длинных многословных запросах
-        часто отдаёт 0 (например, «Аккумуляторы аксессуары Минск» → 0
-        доменов, а «Аккумуляторы Минск» → 9). Это страховка."""
+    def _shorten_phrase(phrase: str) -> str:
+        """SERP-fallback при 0 результатов по полной фразе. Сокращаем ТОЛЬКО
+        реально длинные фразы (≥3 значимых слова) до последних 2 слов
+        (head-термин). Короткий рыночный термин («база отдыха», 2 слова) НЕ
+        трогаем — иначе деградация в одиночное generic-слово «отдыха», которое
+        ловит турагентства/блоги (разбор 800b4eca). Возврат «» → fallback не
+        сработает, SERP вернёт [] (карточки/citations покроют)."""
         STOP = {"и", "или", "для", "под", "при", "на", "в", "с", "по",
                 "об", "от", "до"}
-        for w in (phrase or "").split():
-            wn = w.strip("«»\"'.,()-—:;").lower()
-            if wn and wn not in STOP and len(wn) >= 5:
-                return w
-        return (phrase or "").strip()
+        words = [
+            w for w in (phrase or "").split()
+            if w.strip("«»\"'.,()-—:;").lower() not in STOP
+            and len(w.strip("«»\"'.,()-—:;")) >= 3
+        ]
+        if len(words) <= 2:
+            return ""  # короткий термин не сокращаем
+        return " ".join(words[-2:])
 
     # ТЗ catcore-dogon-3-pravki Правка 1: SERP-запрос Блока А строится из
     # primary_category — это РЫНОЧНЫЙ поисковый термин («база отдыха»,
@@ -720,7 +775,7 @@ async def _find_competitors_via_serp(
     # Это страховка, чтобы Block A не падал из-за случайной волатильности
     # XMLRiver. На стабильных запросах второго захода не будет.
     if not results:
-        short_primary = _first_keyword(p_cat) or _first_keyword(p_sub)
+        short_primary = _shorten_phrase(p_cat) or _shorten_phrase(p_sub)
         if short_primary and short_primary.lower() != primary.lower():
             short_query = " ".join(p for p in [short_primary, city] if p).strip()
             if short_query and short_query.lower() != query.lower():
@@ -794,6 +849,11 @@ async def _find_competitors_via_serp(
             if site_country and site_country != client_country:
                 rej_wrong_country += 1
                 continue
+        # 1b. Для LOCAL — строгий регион (город, не только страна): отсекает
+        # федеральные сайты, всплывшие в SERP под локальный запрос.
+        if require_region and not _site_in_client_region(u, text, region):
+            rej_wrong_country += 1
+            continue
         # 2. Категория сайта = категория клиента (стемы повторяются ≥2 раз).
         if not _site_matches_category(text, keywords):
             rej_off_topic += 1
@@ -1266,6 +1326,8 @@ async def _find_competitors_from_ai_citations(
 
     region = niche.get("region", "")
     client_country = _client_country(region)
+    from app.core.niche_detector import business_scope as _bscope
+    _scope_local_niche = _bscope(niche) == "local"
     excl_lower = {e.strip().lower() for e in (exclude or []) if e}
     brand_lc = (brand_name or "").lower()
 
@@ -1321,6 +1383,12 @@ async def _find_competitors_from_ai_citations(
             if not site_country or site_country != client_country:
                 rej_wrong_country += 1
                 continue
+        # РЕГИОН клиента (не только страна): citations часто содержат федеральные
+        # агрегаторы (tutu.ru, zagorodvse.ru) — страну РФ проходят, но город
+        # клиента не подтверждают. Для LOCAL Блока А это не прямые конкуренты.
+        if _scope_local_niche and not _site_in_client_region(u, text, region):
+            rej_wrong_country += 1
+            continue
         # Каталог/агрегатор (много городов) — не отдельный конкурент.
         if _looks_like_catalog(text):
             rej_off_topic += 1
@@ -1549,7 +1617,8 @@ async def build_competitor_list(
             exclude = [brand_name] + after_cards + ([client_domain] if client_domain else [])
             try:
                 serp_names = await _find_competitors_via_serp(
-                    niche, exclude=exclude, count=count - len(after_cards)
+                    niche, exclude=exclude, count=count - len(after_cards),
+                    require_region=True,  # LOCAL: только сайты региона клиента
                 )
             except Exception as exc:
                 logger.warning("serp_block_a_failed", error=str(exc))

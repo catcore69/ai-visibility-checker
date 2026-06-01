@@ -275,6 +275,16 @@ def count_distinct_cities(text: str) -> int:
     return len(cities)
 
 
+def detect_region_sync(url: str, text: str) -> dict:
+    """Определение региона по УЖЕ скачанному тексту (без сети). Возвращает
+    тот же dict, что async detect_region: {country, city, confidence, signals}.
+    Используется для проверки региона сайтов-конкурентов в Блоке А."""
+    try:
+        return _aggregate(_extract_signals(url or "", text or ""))
+    except Exception:
+        return {"country": "unknown", "city": None, "confidence": "low", "signals": []}
+
+
 def _aggregate(signals: list) -> dict:
     """Считает голоса по странам, выбирает страну и город."""
     if not signals:

@@ -640,6 +640,35 @@ def _strip_brand_queries(queries: list[str], exclude_names: list[str]) -> list[s
     return out
 
 
+def _ensure_primary_seed(
+    prompts: list[str], niche: dict[str, Any], count: int
+) -> list[str]:
+    """ТЗ-разбор 800b4eca, пункт 3: гарантируем, что ОСНОВНОЙ запрос ниши —
+    «<primary_category> <регион>» (напр. «база отдыха хабаровский край») —
+    присутствует ПЕРВЫМ. Подсказки Google/Yandex часто возвращают вторичную
+    формулировку («загородный отдых хабаровск»), а главный рыночный термин
+    теряется. Только для LOCAL (для онлайн/федерального гео-привязка не нужна).
+    """
+    try:
+        from app.core.niche_detector import primary_category, business_scope
+    except Exception:
+        return prompts
+    if business_scope(niche) != "local":
+        return prompts
+    p_cat = (primary_category(niche) or "").strip()
+    region = (niche.get("region") or "").split(",")[0].strip()
+    if not p_cat or not region:
+        return prompts
+    seed = f"{p_cat} {region}".lower().strip()
+    norm = lambda s: re.sub(r"\s+", " ", (s or "").strip()).lower()
+    seed_n = norm(seed)
+    existing = {norm(p) for p in prompts}
+    if seed_n in existing:
+        return prompts  # уже есть — не дублируем
+    logger.info("primary_seed_prepended", seed=seed)
+    return [seed] + prompts[: max(0, count - 1)]
+
+
 async def _select_real_queries(
     niche: dict[str, Any],
     real_queries: list[str],
@@ -778,6 +807,7 @@ async def generate_prompts(
         # Стоп-лист брендов применяем и к кешу: имена конкурентов
         # детерминированы по нише, фильтр дёшев (без сети/LLM).
         cached = _strip_brand_queries(cached, exclude_names or [])
+        cached = _ensure_primary_seed(cached, niche, count)
         logger.info("prompts_from_cache", niche_key=niche_key, count=len(cached))
         return cached[:count]
     if cached and _looks_like_template_residue(cached):
@@ -812,6 +842,10 @@ async def generate_prompts(
         # Совсем не нашли реальных подсказок — крайний случай.
         prompts = await _generate_via_llm(niche, count)
         logger.warning("prompts_template_fallback_used", niche_key=niche_key, count=len(prompts))
+
+    # Гарантируем основной запрос ниши «<primary_category> <регион>» первым.
+    if prompts:
+        prompts = _ensure_primary_seed(prompts, niche, count)
 
     if prompts and len(prompts) >= 5:
         # Сохраняем только если получили достаточное число — мусор не кешируем.
