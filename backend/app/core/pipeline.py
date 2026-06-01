@@ -300,8 +300,9 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
                     brand_name=report.brand_name,
                     client_competitors=client_competitors,
                     count=settings.COMPETITORS_PER_REPORT,
-                    ai_citations=ai_citations,  # реальные URL из <item> AI Overview
+                    ai_citations=ai_citations,  # реальные URL из <item> AI Overview (LOCAL)
                     client_url=report.url or "",  # чтобы не попасть самим в Block A
+                    raw_responses=raw_responses,  # для ONLINE_FEDERAL/PERSONAL_BRAND веток
                 )
                 logger.info(
                     "block_a_built",

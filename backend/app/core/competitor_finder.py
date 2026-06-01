@@ -93,6 +93,53 @@ def _is_blacklisted_host(host: str) -> bool:
     return False
 
 
+# ГЛОБАЛЬНЫЙ фильтр «информационный ресурс / агрегатор / каталог», а не
+# сайт компании-конкурента. ТЗ catcore-dogon-3-pravki (разбор e2a20204):
+# citations Google AI Overview и часть SERP — это отзовики (otzovik),
+# вики (gorodwiki), порталы (shamora), агрегаторы (booking-подобные),
+# рейтинги/каталоги. Они САМИ пишут про нишу, поэтому категория-фильтр их
+# не ловит. Отсекаем по КЛАССУ домена (подстроки), а не по конкретному
+# домену — механика работает для любой ниши и региона.
+_INFO_RESOURCE_DOMAIN_PATTERNS = (
+    # Отзывы/рейтинги
+    "otzovik", "otzyv", "otziv", "irecommend", "review", "feedback",
+    "reiting", "rating", "ratings", "top10", "top-10", "vsе-otzyvy",
+    # Вики/справочники/энциклопедии
+    "wiki", "gorodwiki", "spravochnik", "spravka", "encyclop",
+    # Порталы/новости/форумы/афиши
+    "portal", "forum", "novosti", "news", "afisha", "gorod-",
+    "-gorod", "gorods", "bezformata", "blizko", "regionz",
+    # Каталоги/агрегаторы/маркетплейсы услуг
+    "katalog", "catalog", "agregator", "spisok", "navigator",
+    "vsе-", "all-", "найди", "poisk", "search",
+    # Агрегаторы бронирования (для туризма/отелей/баз) — каналы, не компании
+    "booking", "bron", "zabronirui", "ostrovok", "sutochno",
+    # Карты/геосервисы
+    "2gis", "yandex", "google", "maps",
+)
+
+
+def _is_info_resource(host: str) -> bool:
+    """True, если домен по классу — информационный ресурс/агрегатор/каталог,
+    а не сайт одной компании-конкурента. Подстрочный матч по host (без TLD-
+    шума): «otzovik.com», «gorodwiki.ru», «my-portal.info» → True.
+
+    Глобально, не под конкретный кейс: ловит КЛАСС сайтов.
+    """
+    h = (host or "").lower()
+    if not h:
+        return False
+    # Берём «тело» домена без зоны для проверки подстрок (otzovik.com → otzovik).
+    core = h
+    for sep in (".",):
+        # оставляем всё до последней точки + sasubdomain'ы — проверяем целиком
+        pass
+    for pat in _INFO_RESOURCE_DOMAIN_PATTERNS:
+        if pat in core:
+            return True
+    return False
+
+
 async def find_competitor_url(name: str, region: str = "Россия") -> Optional[str]:
     """Ищет официальный сайт конкурента через XMLRiver SERP.
 
@@ -140,7 +187,7 @@ async def find_competitor_url(name: str, region: str = "Россия") -> Option
                 continue
             url = url_el.text.strip()
             host = _domain_of(url)
-            if not host or _is_blacklisted_host(host):
+            if not host or _is_blacklisted_host(host) or _is_info_resource(host):
                 continue
             # Берём только корень домена (без длинных путей с трекингом)
             parsed = urlparse(url)
@@ -236,7 +283,7 @@ def _normalize_client_competitors(entries: Optional[list[str]], brand_name: str)
         if _looks_like_url(s):
             url = s if s.startswith("http") else f"http://{s}"
             host = _domain_of(url)
-            if not host or _is_blacklisted_host(host):
+            if not host or _is_blacklisted_host(host) or _is_info_resource(host):
                 continue  # справочник/соцсеть — не конкурент
             name = extract_brand_from_url(url)
         else:
@@ -408,6 +455,103 @@ async def _xmlriver_search_combined(query: str, region: str = "Россия", nu
     return out
 
 
+# Браузерные заголовки — XMLRiver без них режет русские запросы в антибот
+# (error 15) и не отдаёт <localresultsplace>. Подтверждено разведкой ЭТАПА 0.
+_BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/126.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+}
+
+
+async def _fetch_business_cards(query: str, num: int = 20) -> list[dict]:
+    """ТЗ catcore-tipy-biznesa, ветка LOCAL источник №1: карточки бизнеса
+    Google (`<localresultsplace>`) из ОБЫЧНОЙ выдачи /search/xml.
+
+    Разведка ЭТАПА 0 установила:
+    - Карточки приходят на ГОЛЫЙ запрос query+user+key + браузерный UA.
+      Параметры setab/loc/country/additional их ЛОМАЮТ (error 15/500).
+    - Регион вшивается в текст query («база отдыха в хабаровском крае»).
+    - Транзиентный error 500 «Выполните перезапрос» — ретраим.
+    - Поля карточки: <title>, <url>, <rating>. url может быть реальным
+      сайтом ИЛИ ссылкой /maps/dir/... (тогда сайт ищем по title отдельно).
+
+    Возвращает [{title, url, rating, has_site}], где has_site=False если
+    url — это /maps/dir/ (не сайт компании).
+    """
+    if not settings.XMLRIVER_USER or not settings.XMLRIVER_KEY:
+        return []
+    if not query or not query.strip():
+        return []
+
+    text = ""
+    for attempt in range(4):
+        try:
+            async with httpx.AsyncClient(timeout=30.0, headers=_BROWSER_HEADERS) as client:
+                resp = await client.get(
+                    "https://xmlriver.com/search/xml",
+                    params={
+                        "user": settings.XMLRIVER_USER,
+                        "key": settings.XMLRIVER_KEY,
+                        "query": query,
+                        "count": str(num),
+                    },
+                )
+                resp.raise_for_status()
+            text = resp.text
+        except Exception as exc:
+            logger.warning("business_cards_http_error", query=query[:60], error=str(exc))
+            return []
+        # Транзиентный error 500 «Выполните перезапрос» — повторяем.
+        if '<error code="500"' in text:
+            await asyncio.sleep(1.5)
+            continue
+        break
+
+    out: list[dict] = []
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError:
+        logger.warning("business_cards_parse_error", query=query[:60])
+        return []
+
+    for item in root.findall(".//localresultsplace/item"):
+        title_el = item.find("title")
+        url_el = item.find("url")
+        rating_el = item.find("rating")
+        title = (title_el.text or "").strip() if title_el is not None else ""
+        url = (url_el.text or "").strip() if url_el is not None else ""
+        rating = (rating_el.text or "").strip() if rating_el is not None else ""
+        if not title:
+            continue
+        # url вида http:///maps/dir/... или google maps — это НЕ сайт компании.
+        has_site = bool(
+            url
+            and url.startswith(("http://", "https://"))
+            and "/maps/" not in url
+            and "google." not in url.lower()
+            and _domain_of(url)
+        )
+        out.append({
+            "title": title,
+            "url": url if has_site else "",
+            "rating": rating,
+            "has_site": has_site,
+        })
+
+    logger.info(
+        "business_cards_fetched",
+        query=query[:60],
+        cards=len(out),
+        with_site=sum(1 for c in out if c["has_site"]),
+    )
+    return out
+
+
 async def _llm_extract_companies(
     candidates: list[dict],
     niche: dict[str, Any],
@@ -570,7 +714,9 @@ async def _find_competitors_via_serp(
     real_urls: list[str] = []
     for r in results:
         d = (r.get("domain") or "").lower()
-        if not d or _is_blacklisted_host(d) or d in seen_domains or d in excl_domains:
+        if not d or _is_blacklisted_host(d) or _is_info_resource(d):
+            continue
+        if d in seen_domains or d in excl_domains:
             continue
         seen_domains.add(d)
         real_urls.append(r["url"])
@@ -853,6 +999,146 @@ async def extract_brands_from_ai_responses(
     return out
 
 
+async def _find_competitors_from_cards(
+    niche: dict[str, Any],
+    brand_name: str,
+    exclude: list[str],
+    count: int = 5,
+) -> list[str]:
+    """ТЗ catcore-tipy-biznesa, LOCAL источник №1: конкуренты из карточек
+    бизнеса Google (`<localresultsplace>`).
+
+    Карточки по ПРИРОДЕ — реальные компании с гео-привязкой (Google local
+    pack отбирает по запросу «<категория> <регион>»). Агрегаторы/отзовики/
+    вики карточек в категории не имеют → отсекаются сами.
+
+    Логика по каждой карточке:
+    - имя = <title> (чистое имя компании); прогоняем через slogan/generic/
+      placeholder/legal-form фильтры;
+    - если у карточки есть сайт (has_site) → fetch_site_summary, проверяем
+      регион+категорию по тексту сайта (как для SERP);
+    - если сайта нет (url=/maps/dir/) → find_competitor_url(title) ищет сайт
+      в органике (твоё замечание). Нашёлся — проверяем. Не нашёлся — карточка
+      всё равно валидна (Google local pack уже подтвердил нишу+гео), берём
+      по title без site-аудита.
+    """
+    from app.core.site_analyzer import (
+        fetch_site_summary,
+        looks_generic_name,
+        is_placeholder_name,
+        looks_like_slogan,
+        country_from_site,
+    )
+    from app.core.niche_detector import primary_category, primary_subcategory
+
+    region = niche.get("region", "")
+    client_country = _client_country(region)
+    city = _city_from_region(region) or region
+    p_cat = primary_category(niche)
+    # Запрос карточек = рыночный термин + регион (текстом), напр.
+    # «база отдыха Хабаровский край».
+    card_query = " ".join(p for p in [p_cat, city] if p).strip()
+    if not card_query:
+        return []
+
+    cards = await _fetch_business_cards(card_query, num=20)
+    if not cards:
+        logger.info("competitors_from_cards_empty", brand=brand_name, query=card_query)
+        return []
+
+    excl_lower = {e.strip().lower() for e in (exclude or []) if e}
+    brand_lc = (brand_name or "").lower()
+    keywords = _category_keywords(niche)
+
+    def _ok_name(n: str) -> bool:
+        return (
+            bool(n)
+            and not looks_generic_name(n)
+            and not is_placeholder_name(n)
+            and not looks_like_slogan(n)
+            and not _starts_with_legal_form(n)
+        )
+
+    # Сначала находим сайты для карточек без сайта (параллельно).
+    cards_need_site = [c for c in cards if not c["has_site"] and _ok_name(c["title"])]
+    found_urls = await asyncio.gather(
+        *[find_competitor_url(c["title"], region) for c in cards_need_site],
+        return_exceptions=True,
+    )
+    site_by_title: dict[str, str] = {}
+    for c, u in zip(cards_need_site, found_urls):
+        if isinstance(u, str) and u:
+            site_by_title[c["title"]] = u
+
+    # Теперь итог: для каждой карточки определяем url (свой или найденный).
+    out: list[str] = []
+    seen: set[str] = set()
+    rej_generic = rej_off_topic = rej_wrong_country = 0
+    cards_with_url = []
+    for c in cards:
+        title = c["title"]
+        if not _ok_name(title):
+            rej_generic += 1
+            continue
+        url = c["url"] or site_by_title.get(title, "")
+        cards_with_url.append((c, url))
+
+    # Параллельно тянем summary тех, у кого есть url (для регион+категория проверки).
+    urls_to_fetch = [u for _, u in cards_with_url if u]
+    summaries = await asyncio.gather(
+        *[fetch_site_summary(u) for u in urls_to_fetch], return_exceptions=True
+    )
+    summ_by_url = {}
+    si = 0
+    for _, u in cards_with_url:
+        if u:
+            summ_by_url[u] = summaries[si] if si < len(summaries) else None
+            si += 1
+
+    for c, url in cards_with_url:
+        title = c["title"]
+        domain_label = _domain_of(url).lower() if url else ""
+        summ = summ_by_url.get(url) if url else None
+        text = summ.get("text") if isinstance(summ, dict) else ""
+
+        # Регион + категория проверяем ТОЛЬКО если есть сайт с текстом.
+        # Если сайта нет — доверяем карточке (Google local pack гео+ниша).
+        if url and isinstance(summ, dict) and text:
+            if client_country:
+                site_country = country_from_site(url, text)
+                if site_country and site_country != client_country:
+                    rej_wrong_country += 1
+                    continue
+            if keywords and not _site_matches_category(text, keywords, min_total=2):
+                rej_off_topic += 1
+                continue
+
+        # Имя: site_name (если сайт дал нормальное) → title карточки → домен.
+        name = title
+        if isinstance(summ, dict):
+            sn = (summ.get("org_name") or "").strip()
+            if _ok_name(sn):
+                name = sn
+        nl = name.lower()
+        if nl in excl_lower or nl in seen or nl == brand_lc:
+            continue
+        seen.add(nl)
+        out.append(name)
+        if len(out) >= count:
+            break
+
+    logger.info(
+        "competitors_from_cards",
+        query=card_query,
+        cards=len(cards),
+        accepted=len(out),
+        rej_generic=rej_generic,
+        rej_off_topic=rej_off_topic,
+        rej_wrong_country=rej_wrong_country,
+    )
+    return out
+
+
 async def _find_competitors_from_ai_citations(
     niche: dict[str, Any],
     brand_name: str,
@@ -891,7 +1177,9 @@ async def _find_competitors_from_ai_citations(
                 if not isinstance(u, str) or not u.startswith(("http://", "https://")):
                     continue
                 d = _domain_of(u)
-                if not d or _is_blacklisted_host(d) or d in seen_domains:
+                if not d or _is_blacklisted_host(d) or _is_info_resource(d):
+                    continue
+                if d in seen_domains:
                     continue
                 seen_domains.add(d)
                 urls.append(u)
@@ -1099,28 +1387,27 @@ async def build_competitor_list(
     count: int = 5,
     ai_citations: Optional[dict] = None,
     client_url: str = "",
+    raw_responses: Optional[dict] = None,
 ) -> tuple[list[str], str, dict[str, str]]:
-    """Блок А — каскад из РЕАЛЬНОЙ выдачи (ТЗ catcore-blok-a-iz-realnoy-vydachi):
+    """Блок А — МАРШРУТИЗАЦИЯ по business_scope (ТЗ catcore-tipy-biznesa).
 
-        1. КЛИЕНТСКИЕ (форма)         → если ≥ count, ТОЛЬКО они, source="client"
-        2. CITATIONS <item> Google AI Overview → реальные URL из AI-ответа
-                                       (детерминированные сайты, не галлюцинации)
-        3. ОРГАНИКА (SERP)            → дополняем до count
-        4. SPARSE                     → если всё < 3, "sparse"
+    Общее начало для всех веток: клиентские конкуренты (форма). Если их ≥count
+    — берём только их. Дальше — стратегия по типу бизнеса:
 
-    LLM-извлечение брендов из текстов ответов моделей (extract_brands_from_ai_
-    responses) для Блока А БОЛЬШЕ НЕ ИСПОЛЬЗУЕТСЯ — слоганы и агрегаторы
-    прорывались. Эта функция теперь питает только Блок Б.
+    LOCAL (локальный бизнес):
+        карточки бизнеса Google → SERP-органика → citations Google+Yandex.
+    ONLINE_FEDERAL / PERSONAL_BRAND (онлайн/федеральный/личный бренд):
+        конкуренты из ОТВЕТОВ ИИ (для них ИИ знает игроков) → федеральная
+        SERP-органика. Карточки не применимы (нет физической точки).
 
     Возвращает (names, overall_source, per_name_source_map).
-    Источники в map: "client" / "ai_overview" / "serp_direct".
     """
+    from app.core.niche_detector import business_scope as _scope
+
+    scope = _scope(niche)
     client_list = _normalize_client_competitors(client_competitors, brand_name)[:count]
     sources_map: dict[str, str] = {n.lower(): "client" for n in client_list}
 
-    # Домен клиента — добавляем в exclude, чтобы клиент не попал в Block A
-    # сам (раньше manomadv.ru приходил из SERP первым результатом и проходил,
-    # потому что brand_name="Manomadv" != "manomadv.ru").
     client_domain = _domain_of(client_url) if client_url else ""
     base_exclude = [brand_name] + client_list
     if client_domain:
@@ -1128,67 +1415,109 @@ async def build_competitor_list(
 
     if len(client_list) >= count:
         logger.info("competitors_from_client_only", count=len(client_list), brand=brand_name)
-        return (
-            client_list[:count],
-            "client",
-            {n: "client" for n in client_list[:count]},
-        )
+        return (client_list[:count], "client", {n: "client" for n in client_list[:count]})
 
-    # === Этап 2: AI Overview citations (реальные URL из <item>) ===
-    ai_names: list[str] = []
-    if ai_citations:
+    # ────────────────────────────────────────────────────────────────────
+    # ВЕТКА LOCAL: карточки → органика → citations
+    # ────────────────────────────────────────────────────────────────────
+    if scope == "local":
+        # Источник №1 — карточки бизнеса Google (localresultsplace).
+        card_names: list[str] = []
         try:
-            ai_names = await _find_competitors_from_ai_citations(
-                niche,
-                brand_name=brand_name,
-                ai_citations=ai_citations,
-                exclude=base_exclude,
+            card_names = await _find_competitors_from_cards(
+                niche, brand_name=brand_name, exclude=base_exclude,
                 count=count - len(client_list),
             )
         except Exception as exc:
-            logger.warning("ai_citations_block_a_failed", error=str(exc))
-            ai_names = []
-        for n in ai_names:
-            sources_map.setdefault(n.lower(), "ai_overview")
+            logger.warning("cards_block_a_failed", error=str(exc))
+        for n in card_names:
+            sources_map.setdefault(n.lower(), "business_card")
+        after_cards = _merge_dedupe(client_list, card_names, count)
 
-    after_ai = _merge_dedupe(client_list, ai_names, count)
+        # Источник №2 — SERP-органика (дополнение).
+        serp_names: list[str] = []
+        if len(after_cards) < count:
+            exclude = [brand_name] + after_cards + ([client_domain] if client_domain else [])
+            try:
+                serp_names = await _find_competitors_via_serp(
+                    niche, exclude=exclude, count=count - len(after_cards)
+                )
+            except Exception as exc:
+                logger.warning("serp_block_a_failed", error=str(exc))
+            for n in serp_names:
+                sources_map.setdefault(n.lower(), "serp_direct")
+        after_serp = _merge_dedupe(after_cards, serp_names, count)
 
-    # === Этап 3: SERP-органика как дополнение ===
-    serp_names: list[str] = []
-    if len(after_ai) < count:
-        exclude = [brand_name] + after_ai
-        if client_domain:
-            exclude.append(client_domain)
-        try:
-            serp_names = await _find_competitors_via_serp(
-                niche, exclude=exclude, count=count - len(after_ai)
-            )
-        except Exception as exc:
-            logger.warning("serp_block_a_failed", error=str(exc))
-            serp_names = []
-        for n in serp_names:
-            sources_map.setdefault(n.lower(), "serp_direct")
+        # Источник №3 — citations Google AI Overview + Яндекс-Нейро (слитые).
+        ai_names: list[str] = []
+        if ai_citations and len(after_serp) < count:
+            exclude = [brand_name] + after_serp + ([client_domain] if client_domain else [])
+            try:
+                ai_names = await _find_competitors_from_ai_citations(
+                    niche, brand_name=brand_name, ai_citations=ai_citations,
+                    exclude=exclude, count=count - len(after_serp),
+                )
+            except Exception as exc:
+                logger.warning("ai_citations_block_a_failed", error=str(exc))
+            for n in ai_names:
+                sources_map.setdefault(n.lower(), "ai_overview")
+        merged = _merge_dedupe(after_serp, ai_names, count)
 
-    merged = _merge_dedupe(after_ai, serp_names, count)
+        parts = []
+        if card_names: parts.append("cards")
+        if serp_names: parts.append("serp")
+        if ai_names: parts.append("ai")
+        source = ("client+" if client_list else "") + "+".join(parts) if parts else (
+            "client" if client_list else "sparse"
+        )
+        if len(merged) < 3:
+            source = "sparse"
+            logger.info("competitors_sparse", count=len(merged), brand=brand_name, scope=scope)
 
-    # Источник для лога/отчёта
-    if client_list and ai_names and not serp_names:
-        source = "client+ai_overview"
-    elif ai_names and not serp_names:
-        source = "ai_overview"
-    elif ai_names and serp_names:
-        source = "ai_overview+serp"
-    elif client_list and not ai_names and not serp_names:
-        source = "client"
-    elif serp_names and not ai_names:
-        source = "verified"  # legacy-имя для «только SERP»
+    # ────────────────────────────────────────────────────────────────────
+    # ВЕТКА ONLINE_FEDERAL / PERSONAL_BRAND: конкуренты из ответов ИИ → SERP
+    # ────────────────────────────────────────────────────────────────────
     else:
-        source = "sparse"
+        ai_resp_names: list[str] = []
+        if raw_responses:
+            try:
+                ai_resp_names = await _find_competitors_from_ai_responses(
+                    niche, brand_name=brand_name, raw_responses=raw_responses,
+                    exclude=base_exclude, count=count - len(client_list),
+                )
+            except Exception as exc:
+                logger.warning("ai_responses_block_a_failed", error=str(exc))
+        for n in ai_resp_names:
+            sources_map.setdefault(n.lower(), "ai_mentioned")
+        after_ai = _merge_dedupe(client_list, ai_resp_names, count)
 
-    if len(merged) < 3:
-        source = "sparse"
-        logger.info("competitors_sparse", count=len(merged), brand=brand_name)
+        # Федеральная SERP-органика как дополнение (region обычно «Россия»/онлайн
+        # без города → запрос «<категория> Россия», _find_competitors_via_serp
+        # сам не добавит город, если city пуст).
+        serp_names = []
+        if len(after_ai) < count:
+            exclude = [brand_name] + after_ai + ([client_domain] if client_domain else [])
+            try:
+                serp_names = await _find_competitors_via_serp(
+                    niche, exclude=exclude, count=count - len(after_ai)
+                )
+            except Exception as exc:
+                logger.warning("serp_federal_failed", error=str(exc))
+            for n in serp_names:
+                sources_map.setdefault(n.lower(), "serp_direct")
+        merged = _merge_dedupe(after_ai, serp_names, count)
 
+        parts = []
+        if ai_resp_names: parts.append("ai_responses")
+        if serp_names: parts.append("serp")
+        source = ("client+" if client_list else "") + "+".join(parts) if parts else (
+            "client" if client_list else "sparse"
+        )
+        if len(merged) < 3:
+            source = "sparse"
+            logger.info("competitors_sparse", count=len(merged), brand=brand_name, scope=scope)
+
+    logger.info("block_a_scope", scope=scope, source=source, count=len(merged))
     per_name = {n: sources_map.get(n.lower(), "serp_direct") for n in merged[:count]}
     return merged[:count], source, per_name
 
@@ -1229,7 +1558,7 @@ async def extract_ai_mentioned_in_niche(
     ai_names = await extract_brands_from_ai_responses(raw_responses, brand_name, niche)
     if not ai_names:
         logger.info("ai_mentioned_in_niche_empty", brand=brand_name)
-        return []
+        return [], {}
 
     # Плейсхолдеры, generic, slogan и совпадения с Блоком А — выкидываем
     # до похода в SERP. ТЗ catcore-blok-a-iz-realnoy-vydachi:
