@@ -26,6 +26,9 @@ _COMPETITOR_URL_BLACKLIST = {
     "drom.ru", "auto.ru", "cian.ru", "yandex.market", "market.yandex.ru",
     "sbermegamarket.ru", "megamarket.ru", "aliexpress.ru", "aliexpress.com",
     "lamoda.ru", "citilink.ru", "mvideo.ru", "eldorado.ru", "dns-shop.ru",
+    # Доски объявлений / классифайды (включая региональные) — не конкуренты,
+    # это площадки. farpost.ru — ДВ-аналог Авито.
+    "farpost.ru", "irr.ru", "barahla.net", "slando.ru", "unibo.ru",
     # Маркетплейсы/агрегаторы РБ (Итерация-3: Куфар не должен быть «конкурентом»)
     "21vek.by", "kufar.by", "av.by", "hata.by", "deal.by", "relax.by",
     "onliner.by", "praca.by", "rabota.by", "salonbel.by", "1prof.by",
@@ -1554,6 +1557,9 @@ async def extract_ai_mentioned_in_niche(
         country_from_site,
     )
 
+    from app.core.niche_detector import business_scope as _bscope
+    _scope_local = _bscope(niche) == "local"
+
     region = niche.get("region", "")
     ai_names = await extract_brands_from_ai_responses(raw_responses, brand_name, niche)
     if not ai_names:
@@ -1654,6 +1660,16 @@ async def extract_ai_mentioned_in_niche(
             or (client_country and site_country != client_country)
             or is_other_region_same_country
         )
+
+        # ТЗ-разбор bb8e4724: для LOCAL-бизнеса Block Б — ТОЛЬКО регион клиента.
+        # Базы из других регионов РФ не показываем хабаровскому клиенту. Если
+        # site_country другой ИЛИ другой регион внутри страны — отсекаем.
+        # Для online_federal/personal_brand — оставляем (там федералы уместны,
+        # помечаются бейджем).
+        if _scope_local and is_player_in_other_market:
+            rej_other_country += 1
+            continue
+
         # Категория Block Б: строгий ≥2 вхождения стема (равно Блоку А).
         if not _site_matches_category(text, keywords, min_total=2):
             rej_off_topic += 1

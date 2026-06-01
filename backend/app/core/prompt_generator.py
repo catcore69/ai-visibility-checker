@@ -153,6 +153,36 @@ async def _google_suggest(query: str, hl: str = "ru") -> list[str]:
     return []
 
 
+_YANDEX_SUGGEST_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+)
+
+
+async def _yandex_suggest(query: str) -> list[str]:
+    """Бесплатные автоподсказки Яндекса (suggest.yandex.ru, без авторизации).
+
+    ЗАМЕНА сломанному XMLRiver tips (code 500 на нашем ключе) — даёт реальный
+    Яндекс-источник запросов. Формат ответа как у Google:
+    ["запрос", ["подсказка1","подсказка2",...], {...}].
+    """
+    if not query or not query.strip():
+        return []
+    try:
+        async with httpx.AsyncClient(timeout=10.0, headers={"User-Agent": _YANDEX_SUGGEST_UA}) as c:
+            r = await c.get(
+                "https://suggest.yandex.ru/suggest-ya.cgi",
+                params={"v": "4", "part": query},
+            )
+            r.raise_for_status()
+        data = r.json()
+        if isinstance(data, list) and len(data) >= 2 and isinstance(data[1], list):
+            return [s for s in data[1] if isinstance(s, str)][:20]
+    except Exception as exc:
+        logger.warning("yandex_suggest_error", query=query[:60], error=str(exc))
+    return []
+
+
 def _city_from_region(region: str) -> str:
     """«Минск, Беларусь» → «Минск»; «Витебск, Беларусь» → «Витебск»."""
     if not region:
@@ -527,17 +557,20 @@ async def _fetch_real_queries(niche: dict[str, Any]) -> list[str]:
 
     region = niche.get("region", "") or ""
     tasks: list = []
-    # Google suggest — отдельные запросы (открытый API, без оплаты за фразу).
+    # Google suggest — открытый бесплатный API.
     for seed in seeds:
         tasks.append(_google_suggest(seed))
-    # Яндекс tips — ОДИН батч-POST на все сиды (оплата за фразу, но HTTP один).
-    tasks.append(_xmlriver_tips_batch(seeds, region=region))
-    # ТЗ Задача 4.2: Related Searches из Google /search/xml. Дёргаем по первым
-    # 3 сидам — каждый запрос приносит до 20 смежных запросов «бесплатно»
-    # (это часть базовой Google-выдачи). Этого достаточно для разнообразия.
+    # Яндекс suggest — открытый бесплатный API (suggest.yandex.ru). ЗАМЕНА
+    # сломанному XMLRiver tips (code 500 на ключе) — реальный Яндекс-источник.
+    for seed in seeds:
+        tasks.append(_yandex_suggest(seed))
+    # ТЗ Задача 4.2: Related Searches из Google /search/xml — смежные запросы.
     for seed in seeds[:3]:
         tasks.append(_xmlriver_related_searches(seed, region=region))
-    # Wordstat доступен только для РФ-регионов (по конфигу XMLRiver).
+    # XMLRiver tips и wordstat на нашем ключе недоступны (tips=code 500,
+    # wordstat=404) — оставлены как best-effort, ошибки молча игнорируются
+    # (вернут []). Не блокируют пул, который теперь даёт Google+Яндекс suggest.
+    tasks.append(_xmlriver_tips_batch(seeds, region=region))
     if is_rf:
         for seed in seeds[:3]:
             tasks.append(_xmlriver_wordstat(seed))
@@ -570,9 +603,8 @@ async def _fetch_real_queries(niche: dict[str, Any]) -> list[str]:
         llm_extra_seeds=len(extra_seeds),
         seeds_total=len(seeds),
         google_suggest_calls=len(seeds),
-        xmlriver_tips_calls=1,
+        yandex_suggest_calls=len(seeds),
         related_searches_calls=min(3, len(seeds)),
-        wordstat_calls=(min(3, len(seeds)) if is_rf else 0),
         raw=len(raw),
         unique=len(out),
     )
