@@ -43,6 +43,15 @@ def normalize_niche(niche: dict[str, Any]) -> dict[str, Any]:
     n["primary_category"] = prim_cat
     n["primary_subcategory"] = prim_sub
     n["secondary_offerings"] = sec_off
+
+    # business_scope: local / online_federal / personal_brand.
+    # Back-compat: старые отчёты без поля → "local" (это была единственная
+    # поддержанная модель раньше, и большинство клиентов локальные).
+    scope = (n.get("business_scope") or "").strip().lower()
+    if scope not in ("local", "online_federal", "personal_brand"):
+        scope = "local"
+    n["business_scope"] = scope
+
     # Синхронизация обратно для legacy-кода (SERP-запрос, _category_keywords,
     # которые читают niche.category / niche.subcategory).
     if not n.get("category"):
@@ -50,6 +59,12 @@ def normalize_niche(niche: dict[str, Any]) -> dict[str, Any]:
     if not n.get("subcategory"):
         n["subcategory"] = prim_sub
     return n
+
+
+def business_scope(niche: dict[str, Any]) -> str:
+    """local / online_federal / personal_brand (default local для back-compat)."""
+    s = (niche.get("business_scope") or "").strip().lower()
+    return s if s in ("local", "online_federal", "personal_brand") else "local"
 
 
 def primary_category(niche: dict[str, Any]) -> str:
