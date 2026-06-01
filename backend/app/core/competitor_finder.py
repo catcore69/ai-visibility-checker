@@ -520,14 +520,17 @@ async def _find_competitors_via_serp(
                 return w
         return (phrase or "").strip()
 
-    # ТЗ catcore-nisha-primary-secondary: SERP-запрос берёт ТОЛЬКО primary
-    # категорию/подкатегорию. Secondary («рыболовные туры» для агроусадьбы)
-    # не уходят в SERP — иначе запрос «агроусадьба рыболовные туры Хабаровск»
-    # сваливается в рыболовные порталы.
+    # ТЗ catcore-dogon-3-pravki Правка 1: SERP-запрос Блока А строится из
+    # primary_category — это РЫНОЧНЫЙ поисковый термин («база отдыха»,
+    # «аккумуляторы», «бухгалтерские услуги»), тот же, по которому идут
+    # запросы к моделям. НЕ из subcategory/самоназвания («агроусадьба»):
+    # самоназвание не ищется в регионе клиента и даёт sparse.
+    # primary_category теперь нормализован промптом до поискового термина
+    # (не широкая надкатегория «автотовары», не экзотическое «агроусадьба»).
     from app.core.niche_detector import primary_category, primary_subcategory
     p_cat = primary_category(niche)
     p_sub = primary_subcategory(niche)
-    primary = _clean_phrase(p_sub) or _clean_phrase(p_cat) or p_cat.strip()
+    primary = _clean_phrase(p_cat) or _clean_phrase(p_sub) or p_cat.strip()
     region = niche.get("region", "")
     city = _city_from_region(region) or region
     query = " ".join(p for p in [primary, city] if p).strip()
@@ -542,7 +545,7 @@ async def _find_competitors_via_serp(
     # Это страховка, чтобы Block A не падал из-за случайной волатильности
     # XMLRiver. На стабильных запросах второго захода не будет.
     if not results:
-        short_primary = _first_keyword(p_sub) or _first_keyword(p_cat)
+        short_primary = _first_keyword(p_cat) or _first_keyword(p_sub)
         if short_primary and short_primary.lower() != primary.lower():
             short_query = " ".join(p for p in [short_primary, city] if p).strip()
             if short_query and short_query.lower() != query.lower():
@@ -689,13 +692,27 @@ def _category_keywords(niche: dict[str, Any]) -> list[str]:
         ]
         return list({t[:6] for t in distinctive})
 
-    p_sub = primary_subcategory(niche)
-    stems = _stems_from(p_sub)
-    if stems:
-        return stems
-    # Fallback на category, если subcategory не дала специфичных стемов.
+    # ТЗ catcore-dogon-3-pravki Правка 1: стемы фильтра — из primary_category
+    # (тот же поисковый термин, что и SERP-запрос). primary_category теперь
+    # нормализован промптом до рыночного термина: «база отдыха»→['отдыха'],
+    # «аккумуляторы»→['аккуму'], «бухгалтерские услуги»→['бухгал'].
+    # Дополняем стемами из subcategory (если они различны) — для точности,
+    # но primary_category первичен.
     p_cat = primary_category(niche)
-    return _stems_from(p_cat)
+    p_sub = primary_subcategory(niche)
+    stems = set(_stems_from(p_cat))
+    stems |= set(_stems_from(p_sub))
+    if stems:
+        return list(stems)
+    # Если оба пустые (всё в стопе) — короткие слова <5 берём целиком,
+    # чтобы фильтр не остался без ключей и не пропускал всё.
+    raw = " ".join([p_cat, p_sub]).lower()
+    short = [
+        t.strip("«»\"'.,()-—:;")
+        for t in raw.split()
+        if t and t.strip("«»\"'.,()-—:;") not in _CATEGORY_STEM_STOPS
+    ]
+    return list({t[:6] for t in short if t})
 
 
 def _site_matches_category(text: str, keywords: list[str], min_total: int = 2) -> bool:
