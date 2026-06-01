@@ -108,16 +108,23 @@ class GoogleAIOverviewPoller(BasePoller):
             if response.status_code == 429:
                 raise RateLimitError("XMLRiver Google rate limit")
             response.raise_for_status()
-            # Citations (URL-источники AI Overview) сохраняем в storage —
-            # их забирает pipeline через consume_citations() для построения
-            # Блока А «прямые конкуренты».
+            xml_text = response.text
+
+        # КРИТИЧНО: парсинг base64+ET+regex большого ответа (Google AI Overview
+        # отдаёт до 335 KB) — CPU-тяжёлый и СИНХРОННЫЙ. В event loop он
+        # блокирует ВЕСЬ опрос (зависание pipeline на polling_models,
+        # wait_for-таймаут не тикает). Выносим в поток.
+        def _parse() -> str:
             try:
-                cits = self.extract_citations(response.text)
+                cits = self.extract_citations(xml_text)
                 if cits:
                     self._citations[prompt] = cits
             except Exception:
                 pass
-            return self._extract_ai_overview(response.text)
+            return self._extract_ai_overview(xml_text)
+
+        import asyncio as _asyncio
+        return await _asyncio.to_thread(_parse)
 
     def _extract_ai_overview(self, xml_text: str) -> str:
         """Текст AI Overview: base64 → HTML → plain text. Если блока нет —

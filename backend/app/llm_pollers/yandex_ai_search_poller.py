@@ -71,9 +71,12 @@ class YandexAISearchPoller(BasePoller):
     def _extract_citations_from_html(self, html: str) -> list[str]:
         """Из HTML Алисы: сначала <a href>, потом голые URL в тексте.
         Дедуп по домену, нормализуем."""
+        # Ограничиваем размер входа: regex по мегабайтам HTML может молотить
+        # долго. Citations обычно в начале/конце ответа; 80 KB достаточно.
+        html = (html or "")[:80000]
         urls: list[str] = []
         seen: set[str] = set()
-        for m in _HREF_RE.findall(html or ""):
+        for m in _HREF_RE.findall(html):
             u = m.strip()
             if u.startswith("//"):
                 u = "https:" + u
@@ -81,7 +84,7 @@ class YandexAISearchPoller(BasePoller):
                 seen.add(u)
                 urls.append(u)
         # plain-text «alice.yandex.ru», «habr.com» — после strip-tags
-        text_only = re.sub(r"<[^>]+>", " ", html or "")
+        text_only = re.sub(r"<[^>]+>", " ", html)
         for m in _URL_INLINE_RE.findall(text_only):
             u = m.strip().rstrip(".,;:)\"'")
             if u not in seen:
@@ -140,24 +143,27 @@ class YandexAISearchPoller(BasePoller):
             if response.status_code == 429:
                 raise RateLimitError("XMLRiver rate limit")
             response.raise_for_status()
+            xml_text = response.text
 
-            # Сбрасываем предыдущие citations этого вызова и парсим Нейро.
+        # КРИТИЧНО: парсинг base64(HTML 20-30KB) + regex citations — CPU-тяжёлый
+        # и СИНХРОННЫЙ, блокирует event loop и весь опрос. Выносим в поток.
+        def _parse() -> str:
             self._last_citations = []
-            neuro_text = self._extract_neuro_block(response.text)
+            neuro_text = self._extract_neuro_block(xml_text)
             if neuro_text:
-                # Привязываем citations к промпту для pipeline'а.
                 if self._last_citations:
                     self._citations[prompt] = list(self._last_citations)
                 return neuro_text
-
-            organic = self._extract_top_organic(response.text, count=3)
+            organic = self._extract_top_organic(xml_text, count=3)
             if organic:
                 summary = " | ".join(
                     [f"{r['title']}: {r['snippet']}" for r in organic]
                 )
                 return f"[AI-ответ недоступен для запроса] Топ-3 Яндекс: {summary}"
-
             return "[AI-блок в Яндекс-выдаче недоступен для этого запроса]"
+
+        import asyncio as _asyncio
+        return await _asyncio.to_thread(_parse)
 
     def _extract_neuro_block(self, xml_text: str) -> Optional[str]:
         """Извлекает текст Яндекс-Нейро из ответа XMLRiver.
