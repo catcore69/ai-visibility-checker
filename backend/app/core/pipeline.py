@@ -96,16 +96,31 @@ async def poll_all_models(
         for prompt in prompts
     ]
 
-    responses = await asyncio.gather(*[t[2] for t in tasks], return_exceptions=True)
-
     from app.llm_pollers.base import LLMResponse
+
+    # ОБЩИЙ таймаут на весь опрос — вторая страховка от зомби-зависания
+    # (если один поллер всё же блокирует надолго, отчёт не висит вечно).
+    # Бюджет = LLM_CALL_TIMEOUT × число попыток × запас. Что не успело —
+    # заполняется заглушкой, pipeline продолжается.
+    overall_timeout = max(
+        180, getattr(settings, "LLM_CALL_TIMEOUT", 45) * 4
+    )
+    try:
+        responses = await asyncio.wait_for(
+            asyncio.gather(*[t[2] for t in tasks], return_exceptions=True),
+            timeout=overall_timeout,
+        )
+    except asyncio.TimeoutError:
+        logger.error("poll_all_models_overall_timeout", timeout=overall_timeout)
+        responses = [TimeoutError("overall poll timeout")] * len(tasks)
+
     for (model_name, prompt, _), response in zip(tasks, responses):
-        if isinstance(response, Exception):
+        if isinstance(response, BaseException):
             results[model_name][prompt] = LLMResponse(
                 model_name=model_name,
                 prompt=prompt,
                 response_text="",
-                error=str(response),
+                error=str(response) or "poll error",
             )
         else:
             results[model_name][prompt] = response
