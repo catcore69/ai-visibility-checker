@@ -611,12 +611,53 @@ async def _fetch_real_queries(niche: dict[str, Any]) -> list[str]:
     return out
 
 
+def _strip_brand_queries(queries: list[str], exclude_names: list[str]) -> list[str]:
+    """Детерминированно вырезает запросы, содержащие имя конкретного
+    конкурента (из карточек бизнеса). Корень бага 800b4eca: «база отдыха
+    белое озеро», «турбаза узала» — навигация к конкретному заведению, не
+    запрос ниши. Селектор-LLM (gpt-4o-mini) такие имена-как-гео пропускает,
+    поэтому режем по точному списку имён из карточек.
+
+    Имя матчим как нормализованную подстроку (≥4 символа, чтобы не ловить
+    короткие общие слова). «Белое озеро» в «база отдыха белое озеро» → drop.
+    """
+    if not exclude_names:
+        return queries
+    norm = lambda s: re.sub(r"\s+", " ", (s or "").strip().lower())
+    names = [norm(n) for n in exclude_names if n and len(n.strip()) >= 4]
+    if not names:
+        return queries
+    out: list[str] = []
+    dropped = 0
+    for q in queries:
+        qn = norm(q)
+        if any(nm in qn for nm in names):
+            dropped += 1
+            continue
+        out.append(q)
+    if dropped:
+        logger.info("queries_brand_stoplist_dropped", dropped=dropped, kept=len(out))
+    return out
+
+
 async def _select_real_queries(
-    niche: dict[str, Any], real_queries: list[str], count: int, brand_name: str = ""
+    niche: dict[str, Any],
+    real_queries: list[str],
+    count: int,
+    brand_name: str = "",
+    exclude_names: Optional[list[str]] = None,
 ) -> list[str]:
     """ТЗ-2: LLM ОТБИРАЕТ из реальных, ничего не сочиняя. После ответа
     валидируем: каждый запрос должен быть ДОСЛОВНО в `real_queries`.
-    Запросы, которых там нет → LLM их переформулировала → отбрасываем."""
+    Запросы, которых там нет → LLM их переформулировала → отбрасываем.
+
+    exclude_names — имена конкурентов из карточек: и в промпт селектору
+    (явный стоп-лист), и детерминированный пост-фильтр."""
+    if not real_queries:
+        return []
+    # Детерминированно убираем брендовые ещё ДО селектора — чтобы они не
+    # занимали место в топ-80 и не попадали в ветку «мало запросов».
+    real_queries = _strip_brand_queries(real_queries, exclude_names or [])
     if not real_queries:
         return []
     # Если реальных и так мало — отдаём как есть, LLM не нужна.
@@ -625,12 +666,17 @@ async def _select_real_queries(
 
     client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, base_url=settings.OPENAI_BASE_URL)
     lines = "\n".join(f"- {q}" for q in real_queries[:80])
+    exclude_brands = (
+        ", ".join(f"«{n}»" for n in (exclude_names or [])[:20])
+        or "(список пуст — ориентируйся на правило об именах собственных)"
+    )
     prompt = REAL_QUERIES_SELECTOR_PROMPT.format(
         category=niche.get("category", ""),
         subcategory=niche.get("subcategory", ""),
         region=niche.get("region", ""),
         target_audience_description=niche.get("target_audience_description", ""),
         brand_name=brand_name or niche.get("brand", ""),
+        exclude_brands=exclude_brands,
         count=count,
         real_queries=lines,
     )
@@ -712,7 +758,11 @@ async def _generate_via_llm(niche: dict[str, Any], count: int) -> list[str]:
         return []
 
 
-async def generate_prompts(niche: dict[str, Any], count: int = 10) -> list[str]:
+async def generate_prompts(
+    niche: dict[str, Any],
+    count: int = 10,
+    exclude_names: Optional[list[str]] = None,
+) -> list[str]:
     """Возвращает 10 промптов для опроса LLM-моделей.
 
     Алгоритм (Этап 1.3 ТЗ):
@@ -725,6 +775,9 @@ async def generate_prompts(niche: dict[str, Any], count: int = 10) -> list[str]:
 
     cached = await _load_cached_prompts(niche_key)
     if cached and len(cached) >= max(count - 2, 5) and not _looks_like_template_residue(cached):
+        # Стоп-лист брендов применяем и к кешу: имена конкурентов
+        # детерминированы по нише, фильтр дёшев (без сети/LLM).
+        cached = _strip_brand_queries(cached, exclude_names or [])
         logger.info("prompts_from_cache", niche_key=niche_key, count=len(cached))
         return cached[:count]
     if cached and _looks_like_template_residue(cached):
@@ -741,7 +794,11 @@ async def generate_prompts(niche: dict[str, Any], count: int = 10) -> list[str]:
     try:
         real = await _fetch_real_queries(niche)
         if len(real) >= 3:
-            prompts = await _select_real_queries(niche, real, count)
+            prompts = await _select_real_queries(
+                niche, real, count,
+                brand_name=niche.get("brand", ""),
+                exclude_names=exclude_names,
+            )
             logger.info(
                 "prompts_from_real_queries",
                 niche_key=niche_key,

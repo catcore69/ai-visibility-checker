@@ -256,6 +256,25 @@ def _extract_signals(url: str, text: str) -> list[tuple[str, str, int, Optional[
     return signals
 
 
+def count_distinct_cities(text: str) -> int:
+    """Сколько РАЗНЫХ городов/регионов из газеттира упомянуто в тексте.
+
+    Используется для детекции агрегаторов/каталогов: одна локальная компания
+    привязана к 1-2 городам, а каталог (domik.travel, 101hotels, агрегатор
+    бухгалтерий и т.п.) перечисляет десятки. Сигнал нишево-независимый —
+    работает для любой категории и страны. Переиспользует тот же stem-матч,
+    что и определение региона (словоформы, защита от double-count).
+    """
+    if not text:
+        return 0
+    try:
+        signals = _extract_signals("", text)
+    except Exception:
+        return 0
+    cities = {s[3] for s in signals if s[0] == "city" and s[3]}
+    return len(cities)
+
+
 def _aggregate(signals: list) -> dict:
     """Считает голоса по странам, выбирает страну и город."""
     if not signals:
