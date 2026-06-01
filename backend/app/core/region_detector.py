@@ -203,16 +203,24 @@ def _extract_signals(url: str, text: str) -> list[tuple[str, str, int, Optional[
     # Сортировка по числу слов в ключе (DESC) + по длине → составные
     # ключи побеждают одиночные. consumed_spans защищает от double-count.
     def _stem(word: str, default_len: int = 6) -> str:
-        """Безопасный стем: для коротких слов (<5 букв) — слово целиком."""
-        if len(word) <= 4:
+        """Стем-основа для матча словоформ. ВАЖНО (Правка 3): даже короткие
+        слова получают усечение, чтобы «край» матчил «крае», «краю».
+        Берём первые min(len, 4) букв для слов ≤4 (но не короче 3),
+        и первые 6 для длинных. Хвост \w* добавляется снаружи.
+          «край» (4)        → «кра»   → «кра\w*» ловит край/крае/краю/края
+          «хабаровский» (11)→ «хабаро»→ «хабаро\w*»
+          «уфа» (3)         → «уфа»   (3 буквы, целиком, чтобы не ловить «уфолог»)
+        """
+        n = len(word)
+        if n <= 3:
             return re.escape(word)
-        # Для русских словоформ 5–6 первых букв обычно общая основа.
-        # Не используем эвристику окончаний, чтобы не сломать иностранные.
+        if n <= 4:
+            return re.escape(word[:3])
         return re.escape(word[:default_len])
 
     def _build_pattern(key: str) -> re.Pattern:
-        # Каждое слово → стем + \w* (любая словоформа).
-        # Слова склеиваются через `\s+` (на случай двойных пробелов).
+        # Каждое слово → стем-основа + \w* (любая словоформа).
+        # «хабаровский край» → r"\bхабаро\w*\s+кра\w*" ловит «Хабаровском крае».
         words = key.split()
         parts = [_stem(w) + r"\w*" for w in words]
         return re.compile(r"\b" + r"\s+".join(parts), re.UNICODE)
@@ -230,6 +238,11 @@ def _extract_signals(url: str, text: str) -> list[tuple[str, str, int, Optional[
             pat = _build_pattern(city_key)
         except re.error:
             continue
+        # Специфичность: составной ключ («хабаровский край», 2 слова) весит
+        # больше одиночного («хабаровск», 1 слово). При равном числе вхождений
+        # это даёт победу более специфичному региону. Механика глобальная:
+        # работает для всех пар город/край (Ростов/Ростовская и т.д.).
+        key_weight = W_CITY + (len(city_key.split()) - 1)
         for m in pat.finditer(low):
             span = (m.start(), m.end())
             # Защита от double-count: если этот span уже накрыт более длинным.
@@ -238,7 +251,7 @@ def _extract_signals(url: str, text: str) -> list[tuple[str, str, int, Optional[
             consumed_spans.append(span)
             country = CITY_COUNTRY[city_key]
             display = " ".join(w.capitalize() for w in city_key.split())
-            signals.append(("city", country, W_CITY, display))
+            signals.append(("city", country, key_weight, display))
 
     return signals
 
