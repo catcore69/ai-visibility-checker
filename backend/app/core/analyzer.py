@@ -152,24 +152,42 @@ async def analyze_responses(
     analysis = Analysis()
     sem = asyncio.Semaphore(5)  # Ограничиваем параллельные LLM-as-judge вызовы
 
+    # ФИКС 3: для каждого бренда заранее считаем «ядро» — чтобы матч
+    # «База отдыха "Золотая Рыбка"» работал, когда ИИ называет
+    # «Золотая Рыбка». Префиксы-категории/юр.формы/кавычки убираем
+    # ТОЛЬКО для сравнения; в отчёте остаётся полное имя.
+    from app.core.site_analyzer import normalize_brand_for_match
+    brand_cores = {b: normalize_brand_for_match(b) or b.lower() for b in brands}
+
     async def process_one(model_name: str, prompt: str, llm_response: LLMResponse) -> None:
         if llm_response.error or not llm_response.response_text:
             analysis.add_empty(model_name, prompt, brands)
             return
 
         text = llm_response.response_text
+        text_low = text.lower()
 
-        # ШАГ 1: Быстрый regex/fuzzy поиск
+        # ШАГ 1: Быстрый regex/fuzzy поиск — по ЯДРУ имени, не по полному.
         potentially_mentioned = []
+        words = None  # ленивый split
         for brand in brands:
-            if brand.lower() in text.lower():
+            core = brand_cores[brand]
+            if core and core in text_low:
                 potentially_mentioned.append(brand)
-            else:
+                continue
+            # Полное имя как fallback (некоторые ИИ могут писать с префиксом).
+            if brand.lower() in text_low:
+                potentially_mentioned.append(brand)
+                continue
+            # Fuzzy по словам, по ядру.
+            if not core or len(core) < 3:
+                continue
+            if words is None:
                 words = re.findall(r'\b\w{3,}\b', text)
-                for word in words:
-                    if fuzz.ratio(brand.lower(), word.lower()) > 85:
-                        potentially_mentioned.append(brand)
-                        break
+            for word in words:
+                if fuzz.ratio(core, word.lower()) > 85:
+                    potentially_mentioned.append(brand)
+                    break
 
         # ШАГ 2: LLM-as-judge только если что-то найдено
         if potentially_mentioned:

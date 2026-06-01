@@ -284,11 +284,12 @@ async def build_and_upload_pdf(report, analysis: Analysis, competitors: list[str
     # ТЗ Задача 3: метаданные для Блока Б — «федеральный/республиканский игрок».
     ai_mentioned_meta: dict = dict(_niche_dict.get("ai_mentioned_meta") or {})
     is_client_belarus = "беларус" in ((report.region or "")).lower()
-    other_market_label = (
+    cross_country_label = (
         "республиканский игрок, не локальный конкурент"
         if is_client_belarus
         else "федеральный игрок, не локальный конкурент"
     )
+    other_region_label = "из другого региона, не локальный конкурент"
     all_brands = [brand_name] + competitors + ai_mentioned_in_niche
 
     comparison = compare_with_competitors(analysis, brand_name, all_brands)
@@ -310,8 +311,14 @@ async def build_and_upload_pdf(report, analysis: Analysis, competitors: list[str
             item["source"] = "ai_mentioned"
             m = ai_mentioned_meta.get(nl) or {}
             item["is_other_market"] = bool(m.get("is_other_market"))
+            item["is_other_region"] = bool(m.get("is_other_region"))
             item["site_country"] = m.get("site_country") or ""
-            item["other_market_label"] = other_market_label if item["is_other_market"] else ""
+            if m.get("is_other_region"):
+                item["other_market_label"] = other_region_label
+            elif item["is_other_market"]:
+                item["other_market_label"] = cross_country_label
+            else:
+                item["other_market_label"] = ""
         else:
             item["source"] = "other"
             item["is_other_market"] = False
