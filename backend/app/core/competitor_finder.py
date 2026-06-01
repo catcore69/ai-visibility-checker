@@ -662,27 +662,40 @@ async def _find_competitors_via_serp(
 def _category_keywords(niche: dict[str, Any]) -> list[str]:
     """ТЗ catcore-5-globalnyh-fiksov Фикс 1: стемы категория-фильтра.
 
-    Источник стемов — primary_category + primary_subcategory (не secondary).
-    Стоп-лист — _CATEGORY_STEM_STOPS (служебные/гео/общие шапки), а НЕ
-    _GENERIC_WORDS / _GENERIC_NAME_WORDS. Иначе для ниши «база отдыха»
-    оба слова попадают в стоп → стемы пустые → фильтр пропускает всё.
+    Иерархия источников:
+      1. primary_subcategory — узкие, специфичные стемы (агроусадьба, аккумуляторы,
+         аутсорс). Этого ОБЫЧНО достаточно, и это правильный приоритет.
+      2. Если subcategory дала пустые стемы — fallback на primary_category.
+      3. Стоп-лист — _CATEGORY_STEM_STOPS (только служебные/гео/общие шапки).
 
-    Слова САМОЙ ниши («база», «отдыха», «бухгалтерия», «аккумуляторы»)
-    обязаны попадать в стемы — именно по ним сайт-кандидат подтверждает,
-    что он про эту нишу.
+    Зачем приоритет узкого: широкое «база отдыха» содержит стем «отдых-»,
+    который сработает на турагентстве (lider-tour.ru: «отдых на море»).
+    Узкое «агроусадьба» даёт стем «агроус-» — у турагентства его нет.
+
+    На 3 кейсах:
+    - Манома: p_sub=«агроусадьба» → ['агроус'] (отрезает турагентства)
+    - Витебск: p_sub=«бухгалтерский аутсорс» → ['бухгал','аутсор']
+    - Минск: p_sub=«аккумуляторы» → ['аккуму']
     """
     from app.core.site_analyzer import _CATEGORY_STEM_STOPS
     from app.core.niche_detector import primary_category, primary_subcategory
-    p_cat = primary_category(niche)
+
+    def _stems_from(phrase: str) -> list[str]:
+        raw = (phrase or "").lower()
+        tokens = [t.strip("«»\"'.,()-—:;") for t in raw.split() if t]
+        distinctive = [
+            t for t in tokens
+            if t and t not in _CATEGORY_STEM_STOPS and len(t) >= 5
+        ]
+        return list({t[:6] for t in distinctive})
+
     p_sub = primary_subcategory(niche)
-    raw = " ".join([p_cat, p_sub]).lower()
-    tokens = [t.strip("«»\"'.,()-—:;") for t in raw.split() if t]
-    distinctive = [
-        t for t in tokens
-        if t and t not in _CATEGORY_STEM_STOPS and len(t) >= 5
-    ]
-    # стем = первые 6 символов (грубо, но для русского работает).
-    return list({t[:6] for t in distinctive})
+    stems = _stems_from(p_sub)
+    if stems:
+        return stems
+    # Fallback на category, если subcategory не дала специфичных стемов.
+    p_cat = primary_category(niche)
+    return _stems_from(p_cat)
 
 
 def _site_matches_category(text: str, keywords: list[str], min_total: int = 2) -> bool:
@@ -1204,7 +1217,18 @@ async def extract_ai_mentioned_in_niche(
     # Плейсхолдеры, generic, slogan и совпадения с Блоком А — выкидываем
     # до похода в SERP. ТЗ catcore-blok-a-iz-realnoy-vydachi:
     # «Отдых в гармонии с природой!» не должно быть в Блоке Б.
+    #
+    # ТЗ catcore-5-globalnyh-fiksov: дедуп Block A vs Block B — не только
+    # по именам, но и по ДОМЕНАМ. «Заимка Узалы» (имя в Block B от ИИ)
+    # и «zaimkauzala.ru» (имя-домен в Block A) — это один и тот же конкурент.
     block_a_lc = {n.lower() for n in (existing_block_a or [])}
+    # Если имя в Block A выглядит как домен (содержит точку, без пробелов),
+    # запомним его как «известный домен» для проверки URL'ов из Block B.
+    block_a_domains: set[str] = {
+        n.lower().strip()
+        for n in (existing_block_a or [])
+        if n and "." in n and " " not in n.strip()
+    }
     brand_lc = (brand_name or "").lower()
     ai_names = [
         n for n in ai_names
@@ -1222,7 +1246,16 @@ async def extract_ai_mentioned_in_niche(
     )
     keywords = _category_keywords(niche)
     client_country = _client_country(region)
-    valid_pairs = [(n, u) for n, u in zip(ai_names, urls) if isinstance(u, str) and u]
+    # Дедуп по домену: если URL кандидата — уже в Block A, пропускаем
+    # (даже если имена разные: «Заимка Узалы» vs «zaimkauzala.ru»).
+    valid_pairs = []
+    for n, u in zip(ai_names, urls):
+        if not isinstance(u, str) or not u:
+            continue
+        d = _domain_of(u)
+        if d and d.lower() in block_a_domains:
+            continue
+        valid_pairs.append((n, u))
     summaries = await asyncio.gather(
         *[fetch_site_summary(u) for _, u in valid_pairs], return_exceptions=True
     )
