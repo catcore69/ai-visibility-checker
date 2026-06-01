@@ -127,6 +127,18 @@ class CompetitorRow(BaseModel):
     other_market_label: str = ""
     site_country: str = ""
     mentions: int = 0
+    # ТЗ catcore-4-pravki-podachi (Правка 4): откуда игрок попал в отчёт.
+    source_label: str = ""
+
+
+class IntermediaryRow(BaseModel):
+    """ТЗ catcore-4-pravki-podachi (Правка 1): площадки-посредники —
+    агрегаторы/каталоги, которые ИИ называет вместо отдельных компаний."""
+    name: str
+    kind: str = "aggregator"          # aggregator | info_portal
+    kind_label: str = ""
+    source_label: str = ""
+    url: str = ""
 
 
 class ModelBreakdownItem(BaseModel):
@@ -240,6 +252,10 @@ class ReportFull(BaseModel):
     block_a_rows: list[CompetitorRow] = []
     block_b_rows: list[CompetitorRow] = []
     show_block_b: bool = False
+    # ТЗ catcore-4-pravki-podachi: 3-й блок «площадки-посредники» (Правка 1)
+    # и состояние пустого Блока Б — has_players | only_other_regions | free_niche (Правка 3).
+    intermediary_rows: list[IntermediaryRow] = []
+    block_b_state: str = "free_niche"
     model_breakdown: list[ModelBreakdownItem] = []
     prompts_matrix: list[PromptMatrixRow] = []
     models_list: list[ModelListItem] = []

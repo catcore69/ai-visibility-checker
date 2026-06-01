@@ -143,6 +143,53 @@ def _is_info_resource(host: str) -> bool:
     return False
 
 
+# ТЗ catcore-4-pravki-podachi (Правка 1): КЛАССИФИКАЦИЯ игрока, а не отсев.
+# Агрегатор/маркетплейс брони — канал продаж (берёт комиссию), не конкурент.
+_AGGREGATOR_HOST_PATTERNS = (
+    "booking", "bron", "zabronirui", "ostrovok", "sutochno", "tvil",
+    "hotels", "hotellook", "oktogo", "bronevik", "otello",
+    "travel", "tury", "turbaz", "turbazy", "baza-otdyha", "vse-otdyh",
+    "trip", "tripster", "sputnik8", "level.travel", "travelata", "onlinetours",
+    "agoda", "airbnb", "expedia", "trivago", "domik", "sutki", "kvartir",
+    "101hotels", "domclick", "cian", "avito", "youla", "drom", "auto.ru",
+    "market", "ozon", "wildberries", "aliexpress", "deal.by", "kufar", "21vek",
+)
+_PORTAL_HOST_PATTERNS = (
+    "otzovik", "otzyv", "otziv", "irecommend", "review", "feedback",
+    "reiting", "rating", "ratings", "top10", "top-10",
+    "wiki", "gorodwiki", "spravochnik", "spravka", "encyclop",
+    "portal", "forum", "novosti", "news", "afisha", "bezformata",
+    "blizko", "regionz", "katalog", "catalog", "spisok", "navigator",
+    "2gis", "flamp", "zoon", "yell", "tripadvisor", "kudago", "kuda-",
+    "dvhab", "dvnovosti", "amurmedia", "primamedia", "media",
+)
+
+
+def classify_player_type(host: str, text: str = "") -> str:
+    """ТЗ catcore-4-pravki-podachi: классифицирует найденного игрока для
+    ПОДАЧИ в отчёте (не отсев). Возвращает:
+      - "aggregator"  — агрегатор/маркетплейс брони (канал, берёт комиссию);
+      - "info_portal" — портал/каталог/СМИ/отзовик/справочник;
+      - "direct"      — отдельный бизнес-конкурент.
+
+    На существующих сигналах (те же подстроки хоста + детектор каталога по
+    городам). Нишево-независимо: одинаково для баз отдыха/бухгалтерий/АКБ.
+    """
+    h = (host or "").lower()
+    if h.startswith("www."):
+        h = h[4:]
+    if not h:
+        return "direct"
+    if any(p in h for p in _AGGREGATOR_HOST_PATTERNS):
+        return "aggregator"
+    if any(p in h for p in _PORTAL_HOST_PATTERNS):
+        return "info_portal"
+    # Каталог по контенту (много городов) — агрегатор, даже если хост нейтрален.
+    if text and _looks_like_catalog(text):
+        return "aggregator"
+    return "direct"
+
+
 # Порог детектора каталога/агрегатора по числу разных городов в тексте сайта.
 # Одна локальная компания привязана к 1-2 городам (свой город + иногда край/
 # соседний). Каталог (domik.travel, 101hotels, агрегатор бухгалтерий) листит
@@ -1901,6 +1948,14 @@ async def extract_ai_mentioned_in_niche(
         other_region_within_country=rej_other_country,
         rej_generic=rej_generic,
     )
+    # ТЗ catcore-4-pravki-podachi (Правка 3): статистика для подачи пустого
+    # Блока Б. other_region_rejected > 0 при accepted=0 → «ИИ знает только
+    # игроков из других регионов/федералов» (не «ниша пуста»). Ключ «_stats»
+    # — не имя бренда, report_view его не путает с конкурентом.
+    meta["_stats"] = {
+        "other_region_rejected": rej_other_country,
+        "candidates_with_url": len(valid_pairs),
+    }
     return out, meta
 
 

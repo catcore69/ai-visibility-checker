@@ -87,6 +87,16 @@ export interface CompetitorRow {
   other_market_label?: string;
   site_country?: string;
   mentions?: number;
+  // ТЗ catcore-4-pravki-podachi (Правка 4): источник попадания в отчёт
+  source_label?: string;
+}
+
+export interface IntermediaryRow {
+  name: string;
+  kind: string; // aggregator | info_portal
+  kind_label?: string;
+  source_label?: string;
+  url?: string;
 }
 
 export interface PromptMatrixCell {
@@ -132,6 +142,9 @@ export interface ReportFull {
   block_a_rows?: CompetitorRow[];
   block_b_rows?: CompetitorRow[];
   show_block_b?: boolean;
+  // ТЗ catcore-4-pravki-podachi: площадки-посредники + состояние Блока Б
+  intermediary_rows?: IntermediaryRow[];
+  block_b_state?: 'has_players' | 'only_other_regions' | 'free_niche';
   model_breakdown: ModelBreakdown[];
   prompts_matrix: PromptMatrixRow[];
   models_list: { model_name: string; display_name: string; short_name: string }[];
