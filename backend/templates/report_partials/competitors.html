@@ -96,6 +96,7 @@
           {% if brand.is_client %}★ {% endif %}<strong>{{ brand.name }}</strong>
           {% if brand.is_client %}<br><span class="meth-muted">(ваш бренд)</span>{% endif %}
           {% if brand.other_market_label %}<br><span class="federal-badge">{{ brand.other_market_label }}</span>{% endif %}
+          {% if not brand.is_client and brand.source_label %}<br><span class="meth-muted" style="font-size:8pt;">{{ brand.source_label }}</span>{% endif %}
         </td>
         <td style="text-align:center;">
           <strong style="color: {% if brand.is_client %}#A63D3D{% else %}#15171A{% endif %};">{{ brand.score }}</strong>
@@ -127,7 +128,35 @@
     (сайт открывается, страна и категория совпадают с вашими).
   </p>
 
-  {% if show_block_b %}
+  {# ТЗ catcore-4-pravki-podachi (Правка 1): площадки-посредники отдельным
+     блоком — агрегаторы/каталоги, которых ИИ называет вместо отдельных
+     компаний. Это не ошибка, это коммерческий аргумент (комиссия, посредник). #}
+  {% if has_intermediaries %}
+    <h3 class="meth-h3" style="margin-top: 8mm;">Площадки, которые забирают вас в ответах ИИ</h3>
+    <p class="meth-text" style="margin-bottom: 3mm;">
+      Когда ваш клиент спрашивает ИИ про вашу нишу, тот часто рекомендует не отдельные
+      компании, а агрегаторы и каталоги. На этих площадках вы платите комиссию за каждого
+      клиента. Наша задача — вывести в ответы ИИ ваш собственный сайт напрямую, без посредников.
+    </p>
+    <table>
+      <thead>
+        <tr><th>Площадка</th><th style="width:34%;">Тип</th><th style="width:30%;">Источник</th></tr>
+      </thead>
+      <tbody>
+        {% for it in intermediaries %}
+        <tr>
+          <td><strong>{{ it.name }}</strong></td>
+          <td>{{ it.kind_label }}</td>
+          <td><span class="meth-muted" style="font-size:8.5pt;">{{ it.source_label }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+
+  {# Блок Б — кого ИИ называет в нише. Правка 3: пустой блок подаём как
+     ВОЗМОЖНОСТЬ, не как «0/никого». #}
+  {% if has_ai_competitors %}
     {{ brand_table(ai_comparison, "Кого ИИ из вашей ниши уже знает") }}
     <p class="meth-muted" style="font-size:9pt; margin-top:2mm;">
       Бренды, которых сами ИИ-ассистенты называют в ответах на запросы вашей ниши.
@@ -135,6 +164,25 @@
       крупные федеральные игроки или продукты другого типа (SaaS, платформы).
       Но именно их сейчас слышит ваш потенциальный клиент, когда спрашивает ИИ.
     </p>
+  {% else %}
+    <h3 class="meth-h3" style="margin-top: 8mm;">Кого ИИ из вашей ниши уже знает</h3>
+    <div class="gap-conclusion" style="background:#15171A; margin-top:3mm;">
+      {% if block_b_state == 'only_other_regions' %}
+      <p>
+        В вашей нише ИИ знает только игроков <strong>из других регионов и федеральные
+        площадки</strong> — локальных компаний вашего региона он пока не называет.
+        <strong>Место свободно.</strong> Кто первым выстроит правильные сигналы для ИИ
+        в своём регионе, того он и начнёт рекомендовать местным клиентам.
+      </p>
+      {% else %}
+      <p>
+        ИИ-ассистенты пока не выбрали фаворита в вашей нише — не знают ни вас, ни ваших
+        конкурентов. Это <strong>редкое окно</strong>: кто первым выстроит правильные
+        сигналы, того ИИ начнёт рекомендовать. Через год это место будет занято — у
+        конкурентов появится история упоминаний, и перебивать её придётся объёмом.
+      </p>
+      {% endif %}
+    </div>
   {% endif %}
 
   <!-- Где конкуренты обходят клиента — приоритеты роста -->

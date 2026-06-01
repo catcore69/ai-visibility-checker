@@ -334,6 +334,75 @@ async def build_and_upload_pdf(report, analysis: Analysis, competitors: list[str
         if not any(c.get("is_client") for c in direct_comparison):
             direct_comparison.insert(0, client_row)
 
+    # ТЗ catcore-4-pravki-podachi (Правки 1,2,4): классифицируем прямой блок
+    # на direct vs посредники (агрегаторы/порталы) и проставляем метку источника.
+    from app.core.competitor_finder import classify_player_type as _classify_type
+    from urllib.parse import urlparse as _urlparse
+    _SRC_LABELS = {
+        "client": "указан вами", "client_self": "указан вами",
+        "business_card": "из карточек Яндекс / Google Бизнес",
+        "serp_direct": "из поисковой выдачи", "serp": "из поисковой выдачи",
+        "ai_overview": "из ответа ИИ (AI Overview)",
+        "ai_mentioned": "упомянут ИИ в ответе", "ai_responses": "упомянут ИИ в ответе",
+        "reused": "из предыдущего анализа",
+    }
+    _src_map = {str(k).lower(): v for k, v in (_niche_dict.get("competitor_sources") or {}).items()}
+    _url_map: dict[str, str] = {}
+    for _cu in (getattr(report, "competitor_urls", None) or []):
+        if isinstance(_cu, dict) and _cu.get("name"):
+            _url_map[str(_cu["name"]).lower()] = _cu.get("url") or ""
+
+    def _src_label(name: str, default: str = "") -> str:
+        return _SRC_LABELS.get(str(_src_map.get(name.lower(), default) or "").lower(), "")
+
+    def _host(name: str) -> str:
+        url = _url_map.get(name.lower(), "")
+        if not url:
+            return name.strip().lower() if ("." in name and " " not in name.strip()) else ""
+        try:
+            u = url if url.startswith("http") else "http://" + url
+            h = _urlparse(u).netloc.lower()
+            return h[4:] if h.startswith("www.") else h
+        except Exception:
+            return ""
+
+    _KIND_LABELS = {
+        "aggregator": "Агрегатор / площадка брони",
+        "info_portal": "Портал / каталог / СМИ",
+    }
+    intermediaries: list[dict] = []
+    direct_clean: list[dict] = []
+    for c in direct_comparison:
+        if c.get("is_client"):
+            c["source_label"] = ""
+            direct_clean.append(c)
+            continue
+        kind = _classify_type(_host(c.get("name", "")))
+        c["source_label"] = _src_label(c.get("name", ""), "serp_direct")
+        if kind == "direct":
+            direct_clean.append(c)
+        else:
+            intermediaries.append({
+                "name": c.get("name", ""),
+                "kind": kind,
+                "kind_label": _KIND_LABELS.get(kind, "Площадка-посредник"),
+                "source_label": c["source_label"],
+                "url": _url_map.get(c.get("name", "").lower(), ""),
+            })
+    direct_comparison = direct_clean
+    for c in ai_comparison:
+        c["source_label"] = "" if c.get("is_client") else "упомянут ИИ в ответе"
+
+    # Состояние пустого Блока Б (Правка 3): has_players | only_other_regions | free_niche
+    _bb_stats = ai_mentioned_meta.get("_stats") or {}
+    _bb_has = any(not c.get("is_client") for c in ai_comparison)
+    if _bb_has:
+        block_b_state = "has_players"
+    elif int(_bb_stats.get("other_region_rejected") or 0) > 0:
+        block_b_state = "only_other_regions"
+    else:
+        block_b_state = "free_niche"
+
     # ТЗ catcore-blok-a-iz-realnoy-vydachi: Блок Б показывается ВСЕГДА
     # (отдельной секцией, не конкурирует с Блоком А). DIRECT_MENTIONS_MIN
     # используется только для narrative_scenario.
@@ -479,6 +548,10 @@ async def build_and_upload_pdf(report, analysis: Analysis, competitors: list[str
         "direct_competitor_comparison": direct_comparison,
         "has_ai_competitors": any(not c.get("is_client") for c in ai_comparison),
         "has_direct_competitors": any(not c.get("is_client") for c in direct_comparison),
+        # ТЗ catcore-4-pravki-podachi: площадки-посредники + состояние Блока Б.
+        "intermediaries": intermediaries,
+        "has_intermediaries": bool(intermediaries),
+        "block_b_state": block_b_state,
         "model_breakdown": model_breakdown,
         "top_sources": top_sources[:10],
         "worst_prompts": worst_prompts,

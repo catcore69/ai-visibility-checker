@@ -260,6 +260,51 @@ def build_report_full_payload(report, analysis: Analysis) -> dict[str, Any]:
     ai_mentioned_meta: dict = dict(nd.get("ai_mentioned_meta") or {})
     all_brands = [brand_name] + competitors + ai_mentioned_in_niche
 
+    # ТЗ catcore-4-pravki-podachi: метка источника каждого игрока (Правка 4)
+    # и классификация direct/aggregator/info_portal (Правка 1).
+    from urllib.parse import urlparse as _urlparse
+    from app.core.competitor_finder import classify_player_type as _classify_type
+
+    _SRC_LABELS = {
+        "client": "указан вами",
+        "client_self": "указан вами",
+        "business_card": "из карточек Яндекс / Google Бизнес",
+        "serp_direct": "из поисковой выдачи",
+        "serp": "из поисковой выдачи",
+        "ai_overview": "из ответа ИИ (AI Overview)",
+        "ai_mentioned": "упомянут ИИ в ответе",
+        "ai_responses": "упомянут ИИ в ответе",
+        "reused": "из предыдущего анализа",
+    }
+    comp_source_map = {
+        str(k).lower(): v for k, v in (nd.get("competitor_sources") or {}).items()
+    }
+    comp_url_map: dict[str, str] = {}
+    for _cu in (getattr(report, "competitor_urls", None) or []):
+        if isinstance(_cu, dict) and _cu.get("name"):
+            comp_url_map[str(_cu["name"]).lower()] = _cu.get("url") or ""
+
+    def _source_label(name: str, default_src: str = "") -> str:
+        src = comp_source_map.get(name.lower(), default_src)
+        return _SRC_LABELS.get(str(src or "").lower(), "")
+
+    def _host_of(name: str) -> str:
+        url = comp_url_map.get(name.lower(), "")
+        if not url:
+            # имя-домен (stigen.by) — само по себе host
+            if "." in name and " " not in name.strip():
+                return name.strip().lower()
+            return ""
+        try:
+            u = url if url.startswith("http") else "http://" + url
+            h = _urlparse(u).netloc.lower()
+            return h[4:] if h.startswith("www.") else h
+        except Exception:
+            return ""
+
+    def _classify(name: str) -> str:
+        return _classify_type(_host_of(name))
+
     def _brand_row(b: str) -> dict:
         score = calculate_visibility_score(analysis, b)
         presence = calculate_presence_rate(analysis, b)
@@ -283,8 +328,35 @@ def build_report_full_payload(report, analysis: Analysis) -> dict[str, Any]:
     comparison_rank: list[dict] = [_brand_row(b) for b in all_brands]
     comparison_rank.sort(key=lambda x: -x["score"])
 
-    # Блок А отдельной таблицей: клиент + прямые из выдачи.
-    block_a_rows = [_brand_row(b) for b in ([brand_name] + competitors)]
+    # ТЗ catcore-4-pravki-podachi (Правки 1–2): классифицируем найденных
+    # игроков и разводим на ДВА блока — прямые конкуренты (direct) и
+    # площадки-посредники (aggregator/info_portal). domik.travel/habtravel.ru
+    # больше не «прямые конкуренты», а посредники в отдельном блоке.
+    _KIND_LABELS = {
+        "aggregator": "Агрегатор / площадка брони",
+        "info_portal": "Портал / каталог / СМИ",
+    }
+    direct_names: list[str] = []
+    intermediary_rows: list[dict] = []
+    for c in competitors:
+        kind = _classify(c)
+        if kind == "direct":
+            direct_names.append(c)
+        else:
+            intermediary_rows.append({
+                "name": c,
+                "kind": kind,
+                "kind_label": _KIND_LABELS.get(kind, "Площадка-посредник"),
+                "source_label": _source_label(c, "serp_direct"),
+                "url": comp_url_map.get(c.lower(), ""),
+            })
+
+    # Блок А отдельной таблицей: клиент + ТОЛЬКО прямые из выдачи.
+    block_a_rows = [_brand_row(b) for b in ([brand_name] + direct_names)]
+    for r in block_a_rows:
+        r["source_label"] = (
+            "" if r["is_client"] else _source_label(r["name"], "serp_direct")
+        )
     block_a_rows.sort(key=lambda x: (not x["is_client"], -x["score"]))
 
     # Блок Б: клиент (для сравнения) + кого ИИ называет в нише.
@@ -319,17 +391,34 @@ def build_report_full_payload(report, analysis: Analysis) -> dict[str, Any]:
             r["is_other_region"] = bool(m.get("is_other_region"))
             r["site_country"] = m.get("site_country") or ""
             r["other_market_label"] = _label_for(m)
+            r["source_label"] = "упомянут ИИ в ответе"
         else:
             r["is_other_market"] = False
             r["is_other_region"] = False
             r["site_country"] = ""
             r["other_market_label"] = ""
+            r["source_label"] = ""
         return r
     block_b_rows = (
         [_block_b_row(b) for b in ([brand_name] + ai_mentioned_in_niche)]
         if ai_mentioned_in_niche else []
     )
     block_b_rows.sort(key=lambda x: (not x["is_client"], -x["score"]))
+
+    # ТЗ catcore-4-pravki-podachi (Правка 3): состояние пустого Блока Б —
+    # подаём как ВОЗМОЖНОСТЬ, не как «0/никого».
+    #   has_players       — ИИ называет локальных игроков (есть таблица);
+    #   only_other_regions— ИИ знает только федералов/другие регионы (их
+    #                       отсеяли для LOCAL, но факт зафиксирован в _stats);
+    #   free_niche        — ИИ не знает в нише вообще никого (редкое окно).
+    _bb_stats = ai_mentioned_meta.get("_stats") or {}
+    _bb_has_players = any(not r["is_client"] for r in block_b_rows)
+    if _bb_has_players:
+        block_b_state = "has_players"
+    elif int(_bb_stats.get("other_region_rejected") or 0) > 0:
+        block_b_state = "only_other_regions"
+    else:
+        block_b_state = "free_niche"
 
     # ТЗ catcore-nisha-primary-secondary, Задача 3: Блок Б показывается ВСЕГДА,
     # даже при accepted=0. Пустой Блок Б — это валидный сигнал «ниша свободна»
@@ -459,7 +548,7 @@ def build_report_full_payload(report, analysis: Analysis) -> dict[str, Any]:
         "prompts_count":    analysis.total_prompts,
 
         "sov_rank":           sov_rank,
-        "competitors_count":  len(competitors),
+        "competitors_count":  len(direct_names),
 
         "strong_models":     strong_display,
         "weak_models":       weak_display,
@@ -470,6 +559,9 @@ def build_report_full_payload(report, analysis: Analysis) -> dict[str, Any]:
         "block_a_rows":          block_a_rows,
         "block_b_rows":          block_b_rows,
         "show_block_b":          show_block_b,
+        # ТЗ catcore-4-pravki-podachi: 3-й блок «площадки-посредники» + подача пустого Блока Б.
+        "intermediary_rows":     intermediary_rows,
+        "block_b_state":         block_b_state,
         "max_direct_score":      max_direct_score,
         "narrative_scenario":    narrative_scenario,
         "ai_mentioned_in_niche": ai_mentioned_in_niche,

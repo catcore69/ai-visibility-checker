@@ -340,6 +340,9 @@ export default function ReportPage() {
                         >
                           {row.name}
                         </span>
+                        {!row.is_client && row.source_label && (
+                          <div className="text-[10px] text-brand-muted mt-0.5">{row.source_label}</div>
+                        )}
                       </td>
                       <td
                         className={[
@@ -363,7 +366,43 @@ export default function ReportPage() {
                   ))}
                 </tbody>
               </table>
+              <p className="text-[11px] text-brand-muted mt-2 leading-relaxed">
+                Как подбирали: карточки бизнеса вашего региона (Яндекс / Google Бизнес) →
+                поисковая выдача → упоминания в ответах ИИ. У каждой строки — её источник.
+              </p>
             </div>
+
+            {/* Площадки-посредники — агрегаторы/каталоги, которых ИИ называет
+                вместо отдельных компаний. Не конкуренты, а каналы с комиссией. */}
+            {report.intermediary_rows && report.intermediary_rows.length > 0 && (
+              <div className="mt-8">
+                <h3 className="font-heading text-lg mb-2 text-brand-textBright">
+                  Площадки, которые забирают вас в ответах ИИ
+                </h3>
+                <p className="text-xs text-brand-muted mb-3 leading-relaxed">
+                  Когда ваш клиент спрашивает ИИ про вашу нишу, тот часто рекомендует не
+                  отдельные компании, а агрегаторы и каталоги. На этих площадках вы платите
+                  комиссию за каждого клиента. Наша задача — вывести в ответы ИИ ваш
+                  собственный сайт напрямую, без посредников.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {report.intermediary_rows.map((it) => (
+                    <div
+                      key={`im-${it.name}`}
+                      className="rounded-lg border border-amber-700/40 bg-amber-900/15 px-3 py-2 text-sm"
+                    >
+                      <span className="text-amber-200 font-medium">{it.name}</span>
+                      {it.kind_label && (
+                        <span className="text-[10px] text-amber-300/80 ml-2">{it.kind_label}</span>
+                      )}
+                      {it.source_label && (
+                        <div className="text-[10px] text-brand-muted mt-0.5">{it.source_label}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Block B — кого ИИ называет в нише. Показывается ВСЕГДА (даже
                 если accepted=0): пустой Блок Б — это валидный сигнал «ниша
@@ -413,15 +452,25 @@ export default function ReportPage() {
                     ))}
                   </tbody>
                 </table>
-              ) : (
-                <div className="rounded-lg border border-brand-border/60 bg-brand-elevated/20 p-5 text-sm text-brand-text leading-relaxed">
+              ) : report.block_b_state === 'only_other_regions' ? (
+                <div className="rounded-lg border border-accent-700/40 bg-accent-700/10 p-5 text-sm text-brand-text leading-relaxed">
                   <p>
-                    <strong>ИИ пока не называет конкретных игроков в вашей нише</strong>
-                    {report.niche ? ` «${report.niche}»` : ''}.
-                    Это значит, что ниша в ответах ИИ <strong>свободна</strong> —
-                    никто ещё не закрепился. Через год сделать то же самое будет в разы
-                    дороже: у конкурентов появится история упоминаний, и перебивать её
-                    придётся объёмом.
+                    <strong>В вашей нише ИИ знает только игроков из других регионов
+                    и федеральные площадки</strong> — локальных компаний вашего региона
+                    он пока не называет. <strong>Место свободно.</strong> Кто первым выстроит
+                    правильные сигналы для ИИ в своём регионе, того он и начнёт рекомендовать
+                    местным клиентам.
+                  </p>
+                </div>
+              ) : (
+                <div className="rounded-lg border border-accent-700/40 bg-accent-700/10 p-5 text-sm text-brand-text leading-relaxed">
+                  <p>
+                    <strong>ИИ-ассистенты пока не выбрали фаворита в вашей нише</strong>
+                    {report.niche ? ` «${report.niche}»` : ''} — не знают ни вас, ни ваших
+                    конкурентов. Это <strong>редкое окно</strong>: кто первым выстроит
+                    правильные сигналы, того ИИ начнёт рекомендовать. Через год это место
+                    будет занято — у конкурентов появится история упоминаний, и перебивать
+                    её придётся объёмом.
                   </p>
                 </div>
               )}
