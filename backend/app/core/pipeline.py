@@ -469,6 +469,72 @@ async def generate_report(report_id: UUID, db: AsyncSession) -> None:
                 await update_report_field(db, report_id, competitors=competitors)
                 logger.info("competitors_renamed_from_sites", remap=name_remap)
 
+            # ===== Fix идентичности клиента (разбор отчёта ff246ee7) =====
+            # Бренд из домена («Manomadv») ≠ реальному имени с сайта
+            # («Усадьба Манома»). Из-за этого: (1) собственная карточка клиента
+            # попадала в Блок А как «конкурент»; (2) упоминания «Усадьба Манома»
+            # в ответах ИИ засчитывались «конкуренту», а клиент показывал 0.
+            # Чиним: бренд = реальное имя сайта + выкидываем из конкурентов всё,
+            # чей домен = домену клиента ИЛИ имя ≈ имени клиента.
+            try:
+                from app.core.site_analyzer import (
+                    normalize_brand_for_match as _norm_brand,
+                    looks_generic_name as _generic,
+                    is_placeholder_name as _placeholder,
+                    looks_like_slogan as _slogan,
+                )
+                from app.core.competitor_finder import _domain_of as _dom
+
+                real_name = ""
+                if isinstance(client_site_analysis, dict):
+                    real_name = (client_site_analysis.get("org_name") or "").strip()
+                name_ok = bool(
+                    real_name
+                    and not _generic(real_name)
+                    and not _placeholder(real_name)
+                    and not _slogan(real_name)
+                )
+                client_dom = _dom(report.url) if report.url else ""
+                # «Это клиент»: домен клиента + нормализованные имена (старый бренд + реальное).
+                client_norms = {_norm_brand(report.brand_name)}
+                if name_ok:
+                    client_norms.add(_norm_brand(real_name))
+                url_by_name = {
+                    (c.get("name") or "").lower(): (c.get("url") or "")
+                    for c in (competitor_urls or [])
+                }
+
+                def _cand_domain(cname: str) -> str:
+                    u = url_by_name.get(cname.lower(), "")
+                    if u:
+                        return _dom(u)
+                    return cname.strip().lower() if ("." in cname and " " not in cname.strip()) else ""
+
+                deduped, removed_self = [], []
+                for c in (competitors or []):
+                    cd = _cand_domain(c)
+                    if (client_dom and cd and cd == client_dom) or (_norm_brand(c) in client_norms):
+                        removed_self.append(c)
+                        continue
+                    deduped.append(c)
+                if removed_self:
+                    competitors = deduped
+                    competitor_urls = [
+                        cu for cu in (competitor_urls or [])
+                        if (cu.get("name") or "") in competitors
+                    ]
+                    await update_report_field(db, report_id, competitors=competitors)
+                    logger.info("client_self_removed_from_block_a", removed=removed_self)
+                # Бренд → реальное имя сайта (если оно валидно и отличается):
+                # тогда упоминания «Усадьба Манома» засчитаются клиенту.
+                if name_ok and _norm_brand(real_name) != _norm_brand(report.brand_name):
+                    old_brand = report.brand_name
+                    await update_report_field(db, report_id, brand_name=real_name)
+                    report = await get_report(db, report_id)
+                    logger.info("client_brand_renamed", old=old_brand, new=real_name)
+            except Exception as exc:
+                logger.warning("client_identity_fix_failed", error=str(exc))
+
             # Лидер по SoV — определим позже, пока передаём None,
             # gap_analyzer возьмёт первого с fetched=True.
             gap = build_gap_analysis(
